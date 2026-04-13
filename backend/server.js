@@ -7,6 +7,7 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const rateLimit = require('express-rate-limit');
+const QRCode = require('qrcode');
 require('dotenv').config();
 
 const app = express();
@@ -19,13 +20,7 @@ app.use((req, res, next) => {
     next();
 });
 
-// Configuración de seguridad
-const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 100
-});
-
-app.use(limiter);
+// Configuración CORS y body parsing
 app.use(cors({
     origin: ['http://localhost:3000', 'http://127.0.0.1:3000'],
     credentials: true
@@ -33,9 +28,8 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Servir archivos estáticos desde la carpeta frontend
-app.use(express.static(path.join(__dirname, '../frontend')));
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+// NOTA: Rate limiter deshabilitado para desarrollo local sin restricciones
+// En producción, agregar: app.use('/api', rateLimit({...}))
 
 // Configuración de multer para subida de archivos
 const storage = multer.diskStorage({
@@ -102,6 +96,19 @@ function all(sql, params = []) {
     });
 }
 
+// Función helper para registrar en el historial del sistema
+async function registrarHistorial(tipoAccion, descripcion, entidadId, entidadTipo, usuarioId, usuarioNombre, secretariaOrigen, secretariaDestino, detalles) {
+    try {
+        await run(`
+            INSERT INTO historial_sistema
+            (tipo_accion, descripcion, entidad_id, entidad_tipo, usuario_responsable_id, usuario_responsable_nombre, secretaria_origen, secretaria_destino, detalles_adicionales)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [tipoAccion, descripcion, entidadId || null, entidadTipo || null, usuarioId, usuarioNombre || null, secretariaOrigen || null, secretariaDestino || null, detalles ? JSON.stringify(detalles) : null]);
+    } catch (error) {
+        console.error('❌ Error al registrar en historial:', error.message);
+    }
+}
+
 async function initializeDatabase() {
     return new Promise((resolve, reject) => {
         db = new sqlite3.Database(dbPath, async (err) => {
@@ -157,6 +164,24 @@ async function initializeDatabase() {
                         fecha_movimiento DATETIME DEFAULT CURRENT_TIMESTAMP,
                         FOREIGN KEY (id_inventario) REFERENCES inventario(id) ON DELETE CASCADE,
                         FOREIGN KEY (usuario_movimiento) REFERENCES usuarios(id)
+                    )
+                `);
+
+                // Tabla de historial del sistema (unificada para auditoría)
+                await run(`
+                    CREATE TABLE IF NOT EXISTS historial_sistema (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        tipo_accion TEXT NOT NULL CHECK(tipo_accion IN ('creacion_usuario', 'registro_mueble', 'traslado_mueble', 'modificacion_mueble', 'eliminacion_mueble', 'login', 'logout', 'activacion_usuario', 'desactivacion_usuario')),
+                        descripcion TEXT NOT NULL,
+                        entidad_id INTEGER,
+                        entidad_tipo TEXT,
+                        usuario_responsable_id INTEGER NOT NULL,
+                        usuario_responsable_nombre TEXT,
+                        secretaria_origen TEXT,
+                        secretaria_destino TEXT,
+                        detalles_adicionales TEXT,
+                        fecha_accion DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (usuario_responsable_id) REFERENCES usuarios(id)
                     )
                 `);
 
@@ -457,25 +482,45 @@ app.post('/api/inventario', authenticateToken, upload.single('imagen'), async (r
             fecha_alta,
             descripcion,
             costo,
-            resguardante
+            resguardante,
+            secretaria: secretariaBody
         } = req.body;
 
-        // Obtener la secretaría asignada al usuario
-        const usuario = await get('SELECT secretaria FROM usuarios WHERE id = ?', [req.user.id]);
-        
-        if (!usuario || !usuario.secretaria) {
-            return res.status(400).json({
-                success: false,
-                message: 'El usuario no tiene una secretaría asignada. Contacte al administrador.'
-            });
+        let secretaria;
+
+        // Si es admin, puede especificar la secretaría en el body
+        if (req.user.rol === 'admin') {
+            if (secretariaBody) {
+                secretaria = secretariaBody;
+            } else {
+                // Si no especificó, obtener la del usuario admin (si tiene)
+                const usuario = await get('SELECT secretaria FROM usuarios WHERE id = ?', [req.user.id]);
+                secretaria = usuario?.secretaria || 'Sin Secretaría';
+            }
+        } else {
+            // Usuario normal: usar su secretaría asignada
+            const usuario = await get('SELECT secretaria FROM usuarios WHERE id = ?', [req.user.id]);
+            if (!usuario || !usuario.secretaria) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'El usuario no tiene una secretaría asignada. Contacte al administrador.'
+                });
+            }
+            secretaria = usuario.secretaria;
         }
 
-        const secretaria = usuario.secretaria;
+        // Validar campos requeridos con mensajes específicos
+        const camposFaltantes = [];
+        if (!numero_inventario || numero_inventario.trim() === '') camposFaltantes.push('Número de Inventario');
+        if (!fecha_alta) camposFaltantes.push('Fecha de Alta');
+        if (!descripcion || descripcion.trim() === '') camposFaltantes.push('Descripción');
+        if (!costo || isNaN(parseFloat(costo))) camposFaltantes.push('Costo');
+        if (!resguardante || resguardante.trim() === '') camposFaltantes.push('Resguardante');
 
-        if (!numero_inventario || !fecha_alta || !descripcion || !costo || !resguardante) {
+        if (camposFaltantes.length > 0) {
             return res.status(400).json({
                 success: false,
-                message: 'Todos los campos son requeridos'
+                message: `Campos requeridos faltantes: ${camposFaltantes.join(', ')}`
             });
         }
 
@@ -499,10 +544,23 @@ app.post('/api/inventario', authenticateToken, upload.single('imagen'), async (r
 
         // Registrar movimiento
         await run(`
-            INSERT INTO movimientos_inventario 
+            INSERT INTO movimientos_inventario
             (id_inventario, tipo_movimiento, descripcion_movimiento, usuario_movimiento)
             VALUES (?, 'alta', 'Registro de nuevo artículo en el sistema', ?)
         `, [result.lastID, req.user.id]);
+
+        // Registrar en historial del sistema
+        await registrarHistorial(
+            'registro_mueble',
+            `Mueble registrado: ${numero_inventario} - ${descripcion.substring(0, 50)}... en ${secretaria}`,
+            result.lastID,
+            'mueble',
+            req.user.id,
+            req.user.usuario,
+            null,
+            secretaria,
+            { numero_inventario, descripcion, secretaria, costo, resguardante }
+        );
 
         res.status(201).json({
             success: true,
@@ -524,6 +582,68 @@ app.post('/api/inventario', authenticateToken, upload.single('imagen'), async (r
         res.status(500).json({
             success: false,
             message: 'Error al agregar el artículo'
+        });
+    }
+});
+
+// Endpoint para generar QR de un artículo (DEBE ir antes de /api/inventario/:id)
+app.get('/api/inventario/:id/qr', authenticateToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        // Obtener los datos del artículo
+        const item = await get(`
+            SELECT i.*, u.nombre_completo as usuario_registro_nombre
+            FROM inventario i
+            LEFT JOIN usuarios u ON i.usuario_registro = u.id
+            WHERE i.id = ?
+        `, [id]);
+
+        if (!item) {
+            return res.status(404).json({
+                success: false,
+                message: 'Artículo no encontrado'
+            });
+        }
+
+        // Crear objeto con la información del QR
+        const qrData = {
+            numero_inventario: item.numero_inventario,
+            descripcion: item.descripcion,
+            secretaria: item.secretaria,
+            resguardante: item.resguardante,
+            costo: item.costo,
+            fecha_alta: item.fecha_alta,
+            estatus: item.estatus,
+            fecha_registro: item.fecha_registro
+        };
+
+        // Convertir a string JSON
+        const qrText = JSON.stringify(qrData, null, 2);
+
+        // Generar el QR como Data URL (base64)
+        const qrDataUrl = await QRCode.toDataURL(qrText, {
+            width: 400,
+            margin: 2,
+            color: {
+                dark: '#000000',
+                light: '#FFFFFF'
+            }
+        });
+
+        res.json({
+            success: true,
+            data: {
+                qr_image: qrDataUrl,
+                item_info: qrData
+            }
+        });
+
+    } catch (error) {
+        console.error('Error al generar QR:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error al generar el código QR'
         });
     }
 });
@@ -621,7 +741,7 @@ app.delete('/api/inventario/:id', authenticateToken, authorizeAdmin, async (req,
 
         // Registrar movimiento
         await run(`
-            INSERT INTO movimientos_inventario 
+            INSERT INTO movimientos_inventario
             (id_inventario, tipo_movimiento, descripcion_movimiento, usuario_movimiento)
             VALUES (?, 'baja', 'Eliminación del artículo del sistema', ?)
         `, [id, req.user.id]);
@@ -646,6 +766,90 @@ app.delete('/api/inventario/:id', authenticateToken, authorizeAdmin, async (req,
         res.status(500).json({
             success: false,
             message: 'Error al eliminar el artículo'
+        });
+    }
+});
+
+// Endpoint para trasladar mueble entre secretarías
+app.put('/api/inventario/:id/trasladar', authenticateToken, authorizeAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { secretaria_destino, motivo_traslado } = req.body;
+
+        // Validar datos requeridos
+        if (!secretaria_destino) {
+            return res.status(400).json({
+                success: false,
+                message: 'La secretaría de destino es requerida'
+            });
+        }
+
+        // Obtener datos del artículo actual
+        const item = await get('SELECT * FROM inventario WHERE id = ?', [id]);
+
+        if (!item) {
+            return res.status(404).json({
+                success: false,
+                message: 'Artículo no encontrado'
+            });
+        }
+
+        // Verificar que la secretaría de destino sea diferente a la actual
+        if (item.secretaria === secretaria_destino) {
+            return res.status(400).json({
+                success: false,
+                message: 'La secretaría de destino debe ser diferente a la secretaría actual'
+            });
+        }
+
+        const secretaria_origen = item.secretaria;
+
+        // Actualizar la secretaría del artículo
+        await run(`
+            UPDATE inventario
+            SET secretaria = ?, ultima_actualizacion = datetime('now')
+            WHERE id = ?
+        `, [secretaria_destino, id]);
+
+        // Registrar el movimiento de traslado
+        const descripcionMovimiento = `Traslado de ${secretaria_origen} a ${secretaria_destino}. ${motivo_traslado || 'Sin motivo especificado'}`;
+
+        await run(`
+            INSERT INTO movimientos_inventario
+            (id_inventario, tipo_movimiento, descripcion_movimiento, usuario_movimiento)
+            VALUES (?, 'traslado', ?, ?)
+        `, [id, descripcionMovimiento, req.user.id]);
+
+        // Registrar en historial del sistema
+        await registrarHistorial(
+            'traslado_mueble',
+            `Mueble trasladado: ${item.numero_inventario} de ${secretaria_origen} a ${secretaria_destino}`,
+            item.id,
+            'mueble',
+            req.user.id,
+            req.user.usuario,
+            secretaria_origen,
+            secretaria_destino,
+            { numero_inventario: item.numero_inventario, descripcion: item.descripcion, motivo: motivo_traslado }
+        );
+
+        res.json({
+            success: true,
+            message: `Artículo trasladado exitosamente de ${secretaria_origen} a ${secretaria_destino}`,
+            data: {
+                id: item.id,
+                numero_inventario: item.numero_inventario,
+                secretaria_anterior: secretaria_origen,
+                secretaria_nueva: secretaria_destino,
+                motivo: motivo_traslado
+            }
+        });
+
+    } catch (error) {
+        console.error('Error al trasladar artículo:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error al trasladar el artículo'
         });
     }
 });
@@ -714,17 +918,64 @@ app.get('/api/secretarias', authenticateToken, authorizeAdmin, async (req, res) 
     }
 });
 
+// Endpoint para obtener historial del sistema
+app.get('/api/historial', authenticateToken, authorizeAdmin, async (req, res) => {
+    try {
+        const { tipo, fecha_desde, fecha_hasta, limite = 100 } = req.query;
+
+        let query = `
+            SELECT h.*, u.usuario as usuario_nombre
+            FROM historial_sistema h
+            LEFT JOIN usuarios u ON h.usuario_responsable_id = u.id
+            WHERE 1=1
+        `;
+        const params = [];
+
+        if (tipo) {
+            query += ` AND h.tipo_accion = ?`;
+            params.push(tipo);
+        }
+
+        if (fecha_desde) {
+            query += ` AND h.fecha_accion >= ?`;
+            params.push(fecha_desde + ' 00:00:00');
+        }
+
+        if (fecha_hasta) {
+            query += ` AND h.fecha_accion <= ?`;
+            params.push(fecha_hasta + ' 23:59:59');
+        }
+
+        query += ` ORDER BY h.fecha_accion DESC LIMIT ?`;
+        params.push(parseInt(limite));
+
+        const rows = await all(query, params);
+
+        res.json({
+            success: true,
+            data: rows
+        });
+
+    } catch (error) {
+        console.error('Error al obtener historial:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error al obtener el historial'
+        });
+    }
+});
+
 // Rutas de gestión de usuarios (solo admin)
 app.get('/api/usuarios', authenticateToken, authorizeAdmin, async (req, res) => {
     try {
         const users = await all(`
-            SELECT id, usuario, nombre_completo, email, rol, activo,
+            SELECT id, usuario, nombre_completo, email, rol, activo, secretaria,
                    datetime(fecha_creacion) as fecha_registro,
                    datetime(ultimo_acceso) as ultimo_acceso
             FROM usuarios
             ORDER BY fecha_creacion DESC
         `);
-        
+
         res.json({
             success: true,
             data: users
@@ -782,6 +1033,19 @@ app.post('/api/usuarios', authenticateToken, authorizeAdmin, async (req, res) =>
             VALUES (?, ?, ?, ?, ?, ?, 1, datetime('now'))
         `, [usuario, hashedPassword, nombre_completo, email || null, rol, secretaria]);
 
+        // Registrar en historial
+        await registrarHistorial(
+            'creacion_usuario',
+            `Nuevo usuario creado: ${usuario} (${nombre_completo}) - Rol: ${rol}`,
+            result.lastID,
+            'usuario',
+            req.user.id,
+            req.user.usuario,
+            null,
+            secretaria,
+            { rol, email, secretaria }
+        );
+
         res.status(201).json({
             success: true,
             message: 'Usuario creado exitosamente',
@@ -833,7 +1097,111 @@ app.put('/api/usuarios/:id/estado', authenticateToken, authorizeAdmin, async (re
     }
 });
 
-// Rutas de archivos estáticos
+// Endpoint para editar usuario completo (cambiar contraseña, rol, secretaría, etc.)
+app.put('/api/usuarios/:id', authenticateToken, authorizeAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { nombre_completo, email, rol, secretaria, contraseña, activo } = req.body;
+
+        // Verificar que el usuario existe
+        const user = await get('SELECT id, rol FROM usuarios WHERE id = ?', [id]);
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: 'Usuario no encontrado'
+            });
+        }
+
+        // No permitir cambiar el rol del propio admin si se queda sin admins
+        if (parseInt(id) === req.user.id && rol && rol !== 'admin') {
+            const adminCount = await get('SELECT COUNT(*) as count FROM usuarios WHERE rol = "admin" AND activo = 1');
+            if (adminCount.count <= 1) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'No puede cambiar su rol. Debe haber al menos un administrador activo.'
+                });
+            }
+        }
+
+        // Construir la consulta de actualización dinámicamente
+        const updates = [];
+        const params = [];
+
+        if (nombre_completo !== undefined) {
+            updates.push('nombre_completo = ?');
+            params.push(nombre_completo);
+        }
+
+        if (email !== undefined) {
+            updates.push('email = ?');
+            params.push(email);
+        }
+
+        if (rol !== undefined) {
+            updates.push('rol = ?');
+            params.push(rol);
+        }
+
+        if (secretaria !== undefined) {
+            updates.push('secretaria = ?');
+            params.push(secretaria);
+        }
+
+        if (activo !== undefined) {
+            updates.push('activo = ?');
+            params.push(activo ? 1 : 0);
+        }
+
+        // Si se proporciona nueva contraseña, hashearla
+        if (contraseña && contraseña.trim() !== '') {
+            const hashedPassword = await bcrypt.hash(contraseña, 10);
+            updates.push('contraseña = ?');
+            params.push(hashedPassword);
+        }
+
+        if (updates.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'No se proporcionaron campos para actualizar'
+            });
+        }
+
+        params.push(id);
+
+        await run(`UPDATE usuarios SET ${updates.join(', ')} WHERE id = ?`, params);
+
+        // Registrar en historial
+        await registrarHistorial(
+            'modificacion_usuario',
+            `Usuario #${id} actualizado por admin`,
+            parseInt(id),
+            'usuario',
+            req.user.id,
+            req.user.usuario,
+            null,
+            null,
+            { campos_actualizados: updates.map(u => u.split(' ')[0]) }
+        );
+
+        res.json({
+            success: true,
+            message: 'Usuario actualizado exitosamente'
+        });
+
+    } catch (error) {
+        console.error('Error al actualizar usuario:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error al actualizar el usuario'
+        });
+    }
+});
+
+// Rutas de archivos estáticos - DEBEN ir al final para no interferir con API
+// Servir archivos estáticos desde la carpeta frontend
+app.use(express.static(path.join(__dirname, '../frontend')));
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, '../frontend/login.html'));
 });
