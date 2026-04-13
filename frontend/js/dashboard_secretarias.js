@@ -11,11 +11,86 @@ class DashboardSecretariasApp {
     }
 
     async init() {
-        this.loadUserSession();
-        this.setupEventListeners();
-        this.setupSidebar();
-        await this.loadDashboardData();
-        this.showSection('inicio');
+        // Verificar si es una nueva pestaña (versión simple para Chrome)
+        if (this.isNewTab()) {
+            console.log('Nueva pestaña detectada, forzando login...');
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+            window.location.href = '/login.html';
+            return;
+        }
+
+        // Verificación normal
+        if (!this.isAuthenticated()) {
+            console.log('No autenticado, redirigiendo al login...');
+            window.location.href = '/login.html';
+            return;
+        }
+
+        // Si está autenticado, cargar todo de una vez
+        try {
+            this.loadUserSession();
+            this.setupEventListeners();
+            this.setupSidebar();
+            
+            // Verificar sesión cada 30 segundos
+            this.setupSessionCheck();
+            
+            await this.loadDashboardData();
+            this.showSection('inicio');
+            
+            // Mostrar dashboard
+            this.showDashboard();
+        } catch (error) {
+            console.error('Error al cargar el dashboard:', error);
+            window.location.href = '/login.html';
+        }
+    }
+
+    isNewTab() {
+        // Verificar si viene de un login exitoso
+        const fromLogin = sessionStorage.getItem('coming_from_login');
+        if (fromLogin === 'true') {
+            // Limpiar la marca y no considerar como nueva pestaña
+            sessionStorage.removeItem('coming_from_login');
+            return false;
+        }
+
+        // Versión simple para Chrome - usar timestamp
+        const sessionKey = 'dashboard_tab_opened';
+        const existingTime = sessionStorage.getItem(sessionKey);
+        
+        if (!existingTime) {
+            // Primera vez en esta pestaña
+            sessionStorage.setItem(sessionKey, Date.now().toString());
+            return true;
+        }
+        
+        // Si ya existe, verificar si es una recarga real o nueva pestaña
+        const timeDiff = Date.now() - parseInt(existingTime);
+        if (timeDiff > 1000) { // Más de 1 segundo, probablemente nueva pestaña
+            sessionStorage.setItem(sessionKey, Date.now().toString());
+            return true;
+        }
+        
+        return false;
+    }
+
+    isAuthenticated() {
+        const token = localStorage.getItem('token');
+        const userData = localStorage.getItem('user');
+        
+        if (!token || !userData) {
+            return false;
+        }
+
+        try {
+            const user = JSON.parse(userData);
+            return user && token.length > 0;
+        } catch (error) {
+            console.error('Error checking authentication:', error);
+            return false;
+        }
     }
 
     loadUserSession() {
@@ -23,7 +98,7 @@ class DashboardSecretariasApp {
         const userData = localStorage.getItem('user');
         
         if (!this.token || !userData) {
-            window.location.href = '/';
+            window.location.href = '/login.html';
             return;
         }
 
@@ -234,6 +309,9 @@ class DashboardSecretariasApp {
                 break;
             case 'usuarios':
                 await this.loadUsuariosData();
+                break;
+            case 'reportes':
+                await this.loadReportesData();
                 break;
         }
     }
@@ -674,11 +752,22 @@ class DashboardSecretariasApp {
             }
             
             // Show current date
-            document.getElementById('currentDate').textContent = new Date().toLocaleDateString('es-MX', {
+            const now = new Date();
+            const formattedDate = now.toLocaleDateString('es-MX', {
                 year: 'numeric',
                 month: 'long',
                 day: 'numeric'
             });
+            const formattedDateTime = now.toLocaleDateString('es-MX', {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+            
+            document.getElementById('currentDate').textContent = formattedDate;
+            document.getElementById('documentDate').textContent = `Fecha y hora: ${formattedDateTime}`;
             
             // Show modal
             const modal = document.getElementById('detailsModal');
@@ -867,9 +956,45 @@ class DashboardSecretariasApp {
         modal.classList.remove('active');
     }
 
+    setupSessionCheck() {
+        // Verificar sesión cada 30 segundos
+        setInterval(async () => {
+            if (!this.isAuthenticated()) {
+                console.log('Sesión expirada, redirigiendo al login...');
+                this.logout();
+                return;
+            }
+
+            // Opcional: verificar token con el servidor
+            try {
+                const response = await fetch('/api/verify-token', {
+                    headers: {
+                        'Authorization': `Bearer ${this.token}`
+                    }
+                });
+
+                if (!response.ok) {
+                    console.log('Token inválido, redirigiendo al login...');
+                    this.logout();
+                }
+            } catch (error) {
+                console.error('Error verificando token:', error);
+                // Si hay error de red, no cerrar sesión automáticamente
+            }
+        }, 30000); // 30 segundos
+    }
+
+    showDashboard() {
+        const wrapper = document.getElementById('dashboardWrapper');
+        if (wrapper) {
+            wrapper.classList.add('authenticated');
+        }
+    }
+
     logout() {
-        localStorage.clear();
-        window.location.href = '/';
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        window.location.href = '/login.html';
     }
 
     showToast(message, type = 'info') {
@@ -936,19 +1061,41 @@ class DashboardSecretariasApp {
             finalOptions.body = JSON.stringify(options.body);
         }
 
-        try {
-            const response = await fetch(url, finalOptions);
-            const data = await response.json();
+        const maxRetries = 3;
+        let retryCount = 0;
 
-            if (!response.ok) {
-                throw new Error(data.message || 'Error en la solicitud');
+        while (retryCount < maxRetries) {
+            try {
+                const response = await fetch(url, {
+                    ...finalOptions,
+                    signal: AbortSignal.timeout(10000) // 10 segundos timeout
+                });
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.message || 'Error en la solicitud');
+                }
+
+                return data;
+            } catch (error) {
+                retryCount++;
+                console.error(`API Error (intento ${retryCount}/${maxRetries}):`, error);
+                
+                if (retryCount >= maxRetries) {
+                    // Si falla después de todos los intentos
+                    if (error.name === 'AbortError') {
+                        this.showToast('Tiempo de espera agotado. Verifica tu conexión.', 'error');
+                    } else if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+                        this.showToast('Error de conexión. El servidor puede estar inaccesible.', 'error');
+                    } else {
+                        this.showToast(error.message || 'Error de conexión', 'error');
+                    }
+                    throw error;
+                }
+                
+                // Esperar antes de reintentar (exponential backoff)
+                await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
             }
-
-            return data;
-        } catch (error) {
-            console.error('API Error:', error);
-            this.showToast(error.message || 'Error de conexión', 'error');
-            throw error;
         }
     }
 
@@ -972,6 +1119,312 @@ class DashboardSecretariasApp {
             'en_mantenimiento': 'En Mantenimiento'
         };
         return statusMap[status] || status;
+    }
+
+    async loadReportesData() {
+        try {
+            // Mostrar mensaje de carga
+            const reportesSection = document.getElementById('reportes-section');
+            if (reportesSection) {
+                reportesSection.innerHTML = `
+                    <div class="section-header">
+                        <h2>Reportes</h2>
+                        <p>Generación de reportes y estadísticas del sistema</p>
+                    </div>
+                    <div class="reportes-container">
+                        <div class="reporte-card">
+                            <h3>Reporte General de Inventario</h3>
+                            <p>Reporte completo de todos los artículos del sistema</p>
+                            <button class="btn btn-primary" onclick="dashboardApp.generarReporteGeneral()">
+                                <i class="fas fa-file-pdf"></i> Generar PDF
+                            </button>
+                        </div>
+                        <div class="reporte-card">
+                            <h3>Reporte por Secretaría</h3>
+                            <p>Reporte filtrado por secretaría específica</p>
+                            <select id="secretariaReporte" class="form-control">
+                                <option value="">Seleccione una secretaría</option>
+                                <option value="Organización">Organización</option>
+                                <option value="Finanzas">Finanzas</option>
+                                <option value="Asuntos Legales">Asuntos Legales</option>
+                                <option value="Transparencia">Transparencia</option>
+                                <option value="Fomento al Deporte">Fomento al Deporte</option>
+                                <option value="Fomento al Ahorro">Fomento al Ahorro</option>
+                                <option value="Pensiones y Jubilaciones">Pensiones y Jubilaciones</option>
+                                <option value="Oficialía Mayor">Oficialía Mayor</option>
+                                <option value="Actas y Acuerdos">Actas y Acuerdos</option>
+                                <option value="De Interior">De Interior</option>
+                                <option value="Prensa y Propaganda">Prensa y Propaganda</option>
+                                <option value="Trabajo y Conflictos">Trabajo y Conflictos</option>
+                                <option value="Patrimonio">Patrimonio</option>
+                                <option value="Fomento a la Vivienda">Fomento a la Vivienda</option>
+                                <option value="Educación y Cultura">Educación y Cultura</option>
+                                <option value="Auditoría">Auditoría</option>
+                                <option value="Acción Social">Acción Social</option>
+                            </select>
+                            <button class="btn btn-primary" onclick="dashboardApp.generarReporteSecretaria()">
+                                <i class="fas fa-file-pdf"></i> Generar PDF
+                            </button>
+                        </div>
+                        <div class="reporte-card">
+                            <h3>Reporte de Activos vs Mantenimiento</h3>
+                            <p>Comparación entre artículos activos y en mantenimiento</p>
+                            <button class="btn btn-primary" onclick="dashboardApp.generarReporteEstados()">
+                                <i class="fas fa-chart-bar"></i> Generar Reporte
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }
+        } catch (error) {
+            console.error('Error loading reportes data:', error);
+            this.showToast('Error al cargar reportes', 'error');
+        }
+    }
+
+    async generarReporteGeneral() {
+        try {
+            this.showToast('Generando reporte general...', 'info');
+            
+            // Obtener datos del inventario
+            const response = await this.apiCall('/api/inventario');
+            const items = response.data;
+            
+            // Generar PDF
+            await this.generatePDFReport(items, 'Reporte General de Inventario');
+            
+            this.showToast('Reporte general generado exitosamente', 'success');
+        } catch (error) {
+            console.error('Error generating reporte general:', error);
+            this.showToast('Error al generar reporte', 'error');
+        }
+    }
+
+    async generarReporteSecretaria() {
+        const secretaria = document.getElementById('secretariaReporte').value;
+        if (!secretaria) {
+            this.showToast('Seleccione una secretaría', 'warning');
+            return;
+        }
+        
+        try {
+            this.showToast(`Generando reporte de ${secretaria}...`, 'info');
+            
+            // Obtener todos los datos y filtrar por secretaría
+            const response = await this.apiCall('/api/inventario');
+            const allItems = response.data;
+            const filteredItems = allItems.filter(item => item.secretaria === secretaria);
+            
+            // Generar PDF filtrado
+            await this.generatePDFReport(filteredItems, `Reporte de ${secretaria}`);
+            
+            this.showToast(`Reporte de ${secretaria} generado exitosamente`, 'success');
+        } catch (error) {
+            console.error('Error generating reporte secretaria:', error);
+            this.showToast('Error al generar reporte', 'error');
+        }
+    }
+
+    async generarReporteEstados() {
+        try {
+            this.showToast('Generando reporte de estados...', 'info');
+            
+            // Obtener datos del inventario
+            const response = await this.apiCall('/api/inventario');
+            const items = response.data;
+            
+            // Generar PDF de estados
+            await this.generateEstadoReport(items, 'Reporte de Estados del Inventario');
+            
+            this.showToast('Reporte de estados generado exitosamente', 'success');
+        } catch (error) {
+            console.error('Error generating reporte estados:', error);
+            this.showToast('Error al generar reporte', 'error');
+        }
+    }
+
+    async generatePDFReport(items, title) {
+        try {
+            // Inicializar jsPDF
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+            
+            // Configurar fuentes
+            doc.setFont("helvetica");
+            
+            // Título
+            doc.setFontSize(20);
+            doc.text(title, 105, 20, { align: 'center' });
+            
+            // Información del header
+            doc.setFontSize(10);
+            doc.text(`Fecha de generación: ${new Date().toLocaleDateString('es-MX')}`, 105, 30, { align: 'center' });
+            doc.text(`Total de artículos: ${items.length}`, 105, 35, { align: 'center' });
+            
+            // Preparar datos para la tabla
+            const tableData = items.map(item => [
+                item.numero_inventario,
+                item.descripcion,
+                item.secretaria,
+                item.resguardante,
+                this.formatCurrency(item.costo),
+                this.formatStatus(item.estatus),
+                this.formatDate(item.fecha_alta)
+            ]);
+            
+            // Generar tabla con autoTable
+            doc.autoTable({
+                head: [
+                    ['Número', 'Descripción', 'Secretaría', 'Resguardante', 'Costo', 'Estado', 'Fecha Alta']
+                ],
+                body: tableData,
+                startY: 45,
+                styles: {
+                    font: 'helvetica',
+                    fontSize: 8,
+                    cellPadding: 3
+                },
+                headStyles: {
+                    fillColor: [44, 62, 80],
+                    textColor: 255,
+                    fontStyle: 'bold'
+                },
+                alternateRowStyles: {
+                    fillColor: [245, 245, 245]
+                },
+                columnStyles: {
+                    0: { cellWidth: 20 }, // Número
+                    1: { cellWidth: 40 }, // Descripción
+                    2: { cellWidth: 25 }, // Secretaría
+                    3: { cellWidth: 25 }, // Resguardante
+                    4: { cellWidth: 20 }, // Costo
+                    5: { cellWidth: 20 }, // Estado
+                    6: { cellWidth: 20 }  // Fecha
+                }
+            });
+            
+            // Totales
+            const finalY = doc.lastAutoTable.finalY || 45;
+            const valorTotal = items.reduce((sum, item) => sum + (item.costo || 0), 0);
+            
+            doc.setFontSize(10);
+            doc.setFont(undefined, 'bold');
+            doc.text(`Total de artículos: ${items.length}`, 20, finalY + 10);
+            doc.text(`Valor total: ${this.formatCurrency(valorTotal)}`, 20, finalY + 15);
+            
+            // Guardar el PDF
+            doc.save(`${title}_${new Date().toISOString().split('T')[0]}.pdf`);
+            
+        } catch (error) {
+            console.error('Error generating PDF report:', error);
+            throw error;
+        }
+    }
+
+    async generateEstadoReport(items, title) {
+        try {
+            // Inicializar jsPDF
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+            
+            // Configurar fuentes
+            doc.setFont("helvetica");
+            
+            // Título
+            doc.setFontSize(20);
+            doc.text(title, 105, 20, { align: 'center' });
+            
+            // Información del header
+            doc.setFontSize(10);
+            doc.text(`Fecha de generación: ${new Date().toLocaleDateString('es-MX')}`, 105, 30, { align: 'center' });
+            doc.text(`Total de artículos: ${items.length}`, 105, 35, { align: 'center' });
+            
+            // Agrupar por estado
+            const estados = items.reduce((acc, item) => {
+                const estado = item.estatus || 'sin_estado';
+                if (!acc[estado]) acc[estado] = [];
+                acc[estado].push(item);
+                return acc;
+            }, {});
+            
+            // Resumen por estado
+            let currentY = 45;
+            doc.setFontSize(12);
+            doc.setFont(undefined, 'bold');
+            doc.text('Resumen por Estado:', 20, currentY);
+            currentY += 10;
+            
+            doc.setFontSize(10);
+            doc.setFont(undefined, 'normal');
+            Object.keys(estados).forEach(estado => {
+                const count = estados[estado].length;
+                const valor = estados[estado].reduce((sum, item) => sum + (item.costo || 0), 0);
+                doc.text(`${this.formatStatus(estado)}: ${count} artículos (Valor: ${this.formatCurrency(valor)})`, 25, currentY);
+                currentY += 7;
+            });
+            
+            currentY += 10;
+            
+            // Tablas por estado
+            Object.keys(estados).forEach((estado, index) => {
+                // Verificar si necesitamos nueva página
+                if (currentY > 250) {
+                    doc.addPage();
+                    currentY = 20;
+                }
+                
+                // Título del estado
+                doc.setFontSize(14);
+                doc.setFont(undefined, 'bold');
+                doc.text(`${this.formatStatus(estado)} (${estados[estado].length} artículos)`, 20, currentY);
+                currentY += 10;
+                
+                // Preparar datos para la tabla
+                const tableData = estados[estado].map(item => [
+                    item.numero_inventario,
+                    item.descripcion,
+                    item.secretaria,
+                    item.resguardante,
+                    this.formatCurrency(item.costo)
+                ]);
+                
+                // Generar tabla
+                doc.autoTable({
+                    head: [['Número', 'Descripción', 'Secretaría', 'Resguardante', 'Costo']],
+                    body: tableData,
+                    startY: currentY,
+                    styles: {
+                        font: 'helvetica',
+                        fontSize: 8,
+                        cellPadding: 2
+                    },
+                    headStyles: {
+                        fillColor: [52, 152, 219],
+                        textColor: 255,
+                        fontStyle: 'bold'
+                    },
+                    alternateRowStyles: {
+                        fillColor: [245, 245, 245]
+                    },
+                    columnStyles: {
+                        0: { cellWidth: 20 },
+                        1: { cellWidth: 45 },
+                        2: { cellWidth: 25 },
+                        3: { cellWidth: 25 },
+                        4: { cellWidth: 20 }
+                    }
+                });
+                
+                currentY = doc.lastAutoTable.finalY + 10;
+            });
+            
+            // Guardar el PDF
+            doc.save(`${title}_${new Date().toISOString().split('T')[0]}.pdf`);
+            
+        } catch (error) {
+            console.error('Error generating estado report:', error);
+            throw error;
+        }
     }
 }
 

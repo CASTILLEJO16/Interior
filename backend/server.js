@@ -12,6 +12,13 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Configuración de keep-alive y timeouts para mayor estabilidad
+app.use((req, res, next) => {
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('Keep-Alive', 'timeout=300, max=100'); // 5 minutos como el socket timeout
+    next();
+});
+
 // Configuración de seguridad
 const limiter = rateLimit({
     windowMs: 15 * 60 * 1000,
@@ -19,7 +26,10 @@ const limiter = rateLimit({
 });
 
 app.use(limiter);
-app.use(cors());
+app.use(cors({
+    origin: ['http://localhost:3000', 'http://127.0.0.1:3000'],
+    credentials: true
+}));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
@@ -215,6 +225,39 @@ const authenticateToken = (req, res, next) => {
         next();
     });
 };
+
+// Middleware para autenticación de páginas HTML (redirige en lugar de JSON)
+const authenticateHTML = (req, res, next) => {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+
+    // Lista de rutas que NO requieren autenticación
+    const publicRoutes = ['/login.html', '/registro.html', '/'];
+    const isPublicRoute = publicRoutes.includes(req.path);
+    
+    // Lista de extensiones de archivos estáticos
+    const staticExtensions = ['.css', '.js', '.png', '.jpg', '.jpeg', '.gif', '.ico', '.svg', '.woff', '.woff2'];
+    const isStaticFile = staticExtensions.some(ext => req.path.endsWith(ext));
+    
+    if (!token && !isPublicRoute && !isStaticFile) {
+        console.log(`No token found for path: ${req.path}, redirecting to login...`);
+        return res.redirect('/login.html');
+    }
+
+    if (token) {
+        jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
+            if (err) {
+                console.log('Invalid token, redirecting to login...');
+                return res.redirect('/login.html');
+            }
+            req.user = user;
+            next();
+        });
+    } else {
+        next();
+    }
+};
+
 
 // Middleware para verificar rol de administrador
 const authorizeAdmin = (req, res, next) => {
@@ -799,16 +842,16 @@ app.get('/login.html', (req, res) => {
     res.sendFile(path.join(__dirname, '../frontend/login.html'));
 });
 
-app.get('/dashboard', authenticateToken, (req, res) => {
+app.get('/dashboard', (req, res) => {
     res.sendFile(path.join(__dirname, '../frontend/dashboard_secretarias.html'));
 });
 
-app.get('/dashboard_secretarias.html', authenticateToken, (req, res) => {
+app.get('/dashboard_secretarias.html', authenticateHTML, (req, res) => {
     res.sendFile(path.join(__dirname, '../frontend/dashboard_secretarias.html'));
 });
 
 // Ruta para usuarios estándar (solo registro)
-app.get('/registro.html', authenticateToken, (req, res) => {
+app.get('/registro.html', authenticateHTML, (req, res) => {
     res.sendFile(path.join(__dirname, '../frontend/registro.html'));
 });
 
@@ -819,16 +862,28 @@ app.use(errorHandler);
 async function startServer() {
     await initializeDatabase();
     
-    app.listen(PORT, () => {
-        console.log(`🚀 Servidor iniciado en http://localhost:${PORT}`);
-        console.log(`📁 Archivos estáticos en: ${path.join(__dirname, '../frontend')}`);
-        console.log(`📸 Imágenes en: ${path.join(__dirname, 'uploads')}`);
-        console.log(`🗄️  Base de datos: ${dbPath}`);
+    const server = app.listen(PORT, () => {
+        console.log(`? Servidor iniciado en http://localhost:${PORT}`);
+        console.log(`? Archivos estáticos en: ${path.join(__dirname, '../frontend')}`);
+        console.log(`? Imágenes en: ${path.join(__dirname, 'uploads')}`);
+        console.log(`? Base de datos: ${dbPath}`);
     });
+
+    // Configuración de keep-alive para mayor estabilidad
+    server.keepAliveTimeout = 300000; // 5 minutos (300 segundos)
+    server.headersTimeout = 301000; // 301 segundos (un poco más que keepAliveTimeout)
+    
+    // Manejo de conexiones para evitar pérdida
+    server.on('connection', (socket) => {
+        socket.setTimeout(300000); // 5 minutos timeout por conexión (300 segundos)
+        socket.on('timeout', () => {
+            // Timeout silencioso - cerrar socket sin mostrar mensaje
+            socket.destroy();
+        });
+    });
+
+    console.log('? Keep-alive configurado para mayor estabilidad');
 }
-
-
-
 
 startServer().catch(console.error);
 

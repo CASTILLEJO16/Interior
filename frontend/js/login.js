@@ -132,6 +132,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 
                 showSuccess('Inicio de sesión exitoso. Redirigiendo...');
                 
+                // Marcar que viene de login exitoso para evitar detección de nueva pestaña
+                sessionStorage.setItem('coming_from_login', 'true');
+                
                 // Redirigir según el rol del usuario
                 setTimeout(() => {
                     if (result.user.rol === 'admin') {
@@ -190,6 +193,9 @@ document.addEventListener('DOMContentLoaded', function() {
             .then(result => {
                 if (result.success) {
                     const userData = JSON.parse(user);
+                    // Marcar que viene de login exitoso
+                    sessionStorage.setItem('coming_from_login', 'true');
+                    
                     // Redirigir según el rol
                     if (userData.rol === 'admin') {
                         window.location.href = '/dashboard';
