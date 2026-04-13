@@ -56,23 +56,25 @@ class DashboardSecretariasApp {
             return false;
         }
 
-        // Versión simple para Chrome - usar timestamp
-        const sessionKey = 'dashboard_tab_opened';
-        const existingTime = sessionStorage.getItem(sessionKey);
-        
-        if (!existingTime) {
-            // Primera vez en esta pestaña
-            sessionStorage.setItem(sessionKey, Date.now().toString());
-            return true;
+        // Usar performance API para detectar si es un refresh
+        const navEntries = performance.getEntriesByType('navigation');
+        if (navEntries.length > 0 && navEntries[0].type === 'reload') {
+            // Es un refresh, no una nueva pestaña
+            return false;
         }
-        
-        // Si ya existe, verificar si es una recarga real o nueva pestaña
-        const timeDiff = Date.now() - parseInt(existingTime);
-        if (timeDiff > 1000) { // Más de 1 segundo, probablemente nueva pestaña
-            sessionStorage.setItem(sessionKey, Date.now().toString());
-            return true;
+
+        // Fallback: verificar si ya hay una sesión activa en esta pestaña
+        const sessionKey = 'dashboard_tab_active';
+        const isActive = sessionStorage.getItem(sessionKey);
+
+        if (!isActive) {
+            // Primera vez en esta pestaña - marcar como activa
+            sessionStorage.setItem(sessionKey, 'true');
+            // Si hay token válido, permitir continuar (no es nueva pestaña con login válido)
+            const hasToken = localStorage.getItem('token');
+            return !hasToken; // Solo es "nueva pestaña" si NO hay token
         }
-        
+
         return false;
     }
 
@@ -126,9 +128,37 @@ class DashboardSecretariasApp {
     }
 
     setUserSecretaria() {
-        const secretariaField = document.getElementById('secretaria');
-        if (secretariaField && this.currentUser.secretaria) {
-            secretariaField.value = this.currentUser.secretaria;
+        const secretariaSelect = document.getElementById('secretaria');
+        const secretariaDisplay = document.getElementById('secretariaDisplay');
+        const secretariaHelp = document.getElementById('secretariaHelp');
+
+        if (!secretariaSelect || !secretariaDisplay) return;
+
+        if (this.currentUser.rol === 'admin') {
+            // Admin: mostrar selector dropdown
+            secretariaSelect.style.display = 'block';
+            secretariaSelect.required = true;
+            secretariaDisplay.style.display = 'none';
+            secretariaDisplay.required = false;
+            if (secretariaHelp) secretariaHelp.style.display = 'none';
+
+            // Si tiene secretaría asignada, preseleccionarla
+            if (this.currentUser.secretaria) {
+                secretariaSelect.value = this.currentUser.secretaria;
+            }
+        } else {
+            // Usuario normal: mostrar campo readonly con su secretaría
+            secretariaSelect.style.display = 'none';
+            secretariaSelect.required = false;
+            secretariaDisplay.style.display = 'block';
+            secretariaDisplay.required = true;
+            if (secretariaHelp) secretariaHelp.style.display = 'block';
+
+            if (this.currentUser.secretaria) {
+                secretariaDisplay.value = this.currentUser.secretaria;
+            } else {
+                secretariaDisplay.value = 'Sin Secretaría';
+            }
         }
     }
 
@@ -245,7 +275,9 @@ class DashboardSecretariasApp {
             'accion-social': 'Acción Social',
             agregar: 'Agregar Artículo',
             reportes: 'Reportes',
-            usuarios: 'Gestión de Usuarios'
+            usuarios: 'Gestión de Usuarios',
+            traslado: 'Traslado de Muebles',
+            historial: 'Historial del Sistema'
         };
         
         document.getElementById('pageTitle').textContent = titles[sectionName] || 'Dashboard';
@@ -312,6 +344,12 @@ class DashboardSecretariasApp {
                 break;
             case 'reportes':
                 await this.loadReportesData();
+                break;
+            case 'traslado':
+                // La sección de traslado no requiere carga inicial, el admin busca manualmente
+                break;
+            case 'historial':
+                // La sección de historial carga datos cuando el admin usa los filtros
                 break;
         }
     }
@@ -410,6 +448,9 @@ class DashboardSecretariasApp {
                 <button class="btn btn-sm btn-info" onclick="viewDetails(${item.id})" title="Ver Detalles">
                     <i class="fas fa-file-alt"></i>
                 </button>
+                <button class="btn btn-sm btn-success" onclick="dashboardApp.downloadQR(${item.id}, '${item.numero_inventario}')" title="Descargar QR">
+                    <i class="fas fa-qrcode"></i>
+                </button>
                 <button class="btn btn-sm btn-primary" onclick="editItem(${item.id})" title="Editar">
                     <i class="fas fa-edit"></i>
                 </button>
@@ -502,23 +543,30 @@ class DashboardSecretariasApp {
         const isActive = user.activo === 1;
         const statusClass = isActive ? 'success' : 'error';
         const statusText = isActive ? 'Activo' : 'Inactivo';
-        
+
         row.innerHTML = `
             <td>${user.id}</td>
             <td>${user.usuario}</td>
             <td>${user.nombre_completo}</td>
             <td>${user.email || 'N/A'}</td>
             <td><span class="status-badge ${user.rol}">${user.rol === 'admin' ? 'Admin' : 'Usuario'}</span></td>
+            <td>${user.secretaria || 'N/A'}</td>
             <td><span class="status-badge ${statusClass}">${statusText}</span></td>
             <td>${this.formatDate(user.fecha_registro)}</td>
             <td>${user.ultimo_acceso ? this.formatDate(user.ultimo_acceso) : 'Nunca'}</td>
             <td>
-                <button class="btn btn-sm ${isActive ? 'btn-danger' : 'btn-success'}" 
-                        onclick="toggleUserStatus(${user.id}, ${!isActive})" 
-                        ${user.id === this.currentUser.id ? 'disabled title="No puede desactivar su propia cuenta"' : ''}>
-                    <i class="fas ${isActive ? 'fa-ban' : 'fa-check'}"></i>
-                    ${isActive ? 'Desactivar' : 'Activar'}
-                </button>
+                <div style="display: flex; gap: 5px;">
+                    <button class="btn btn-sm btn-primary"
+                            onclick="openEditUserModal(${user.id}, '${user.usuario}', '${user.nombre_completo}', '${user.email || ''}', '${user.rol}', '${user.secretaria || ''}', ${user.activo})"
+                            title="Editar usuario">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                    <button class="btn btn-sm ${isActive ? 'btn-danger' : 'btn-success'}"
+                            onclick="toggleUserStatus(${user.id}, ${!isActive})"
+                            ${user.id === this.currentUser.id ? 'disabled title="No puede desactivar su propia cuenta"' : ''}>
+                        <i class="fas ${isActive ? 'fa-ban' : 'fa-check'}"></i>
+                    </button>
+                </div>
             </td>
         `;
         return row;
@@ -587,15 +635,219 @@ class DashboardSecretariasApp {
                 },
                 body: JSON.stringify({ activo: activate })
             });
-            
+
             const result = await response.json();
-            
+
             if (result.success) {
                 this.showToast(result.message, 'success');
                 this.loadUsuariosData(); // Recargar tabla
             } else {
                 this.showToast(result.message || 'Error al cambiar estado', 'error');
             }
+        } catch (error) {
+            console.error('Error:', error);
+            this.showToast('Error de conexión', 'error');
+        }
+    }
+
+    // Funciones para editar usuario
+    openEditUserModal(id, usuario, nombreCompleto, email, rol, secretaria, activo) {
+        document.getElementById('editUserId').value = id;
+        document.getElementById('editUsername').value = usuario;
+        document.getElementById('editFullName').value = nombreCompleto;
+        document.getElementById('editEmail').value = email;
+        document.getElementById('editRol').value = rol;
+        document.getElementById('editSecretaria').value = secretaria || 'Organización';
+        document.getElementById('editActivo').value = activo ? '1' : '0';
+        document.getElementById('editPassword').value = ''; // Limpiar contraseña
+
+        document.getElementById('editUserModal').style.display = 'block';
+    }
+
+    closeEditUserModal() {
+        document.getElementById('editUserModal').style.display = 'none';
+    }
+
+    async saveUserEdit() {
+        const id = document.getElementById('editUserId').value;
+        const nombreCompleto = document.getElementById('editFullName').value;
+        const email = document.getElementById('editEmail').value;
+        const rol = document.getElementById('editRol').value;
+        const secretaria = document.getElementById('editSecretaria').value;
+        const activo = document.getElementById('editActivo').value === '1';
+        const password = document.getElementById('editPassword').value;
+
+        if (!nombreCompleto) {
+            this.showToast('El nombre completo es requerido', 'error');
+            return;
+        }
+
+        const updateData = {
+            nombre_completo: nombreCompleto,
+            email: email,
+            rol: rol,
+            secretaria: secretaria,
+            activo: activo
+        };
+
+        // Solo enviar contraseña si se proporcionó
+        if (password && password.trim() !== '') {
+            if (password.length < 6) {
+                this.showToast('La contraseña debe tener al menos 6 caracteres', 'error');
+                return;
+            }
+            updateData.contraseña = password;
+        }
+
+        try {
+            const response = await fetch(`/api/usuarios/${id}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('token')}`
+                },
+                body: JSON.stringify(updateData)
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                this.showToast('Usuario actualizado exitosamente', 'success');
+                this.closeEditUserModal();
+                this.loadUsuariosData(); // Recargar tabla
+            } else {
+                this.showToast(result.message || 'Error al actualizar usuario', 'error');
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            this.showToast('Error de conexión', 'error');
+        }
+    }
+
+    // Funciones de Traslado de Muebles
+    async buscarArticulosTraslado() {
+        try {
+            const busqueda = document.getElementById('trasladoBusqueda').value.trim();
+            const secretariaOrigen = document.getElementById('trasladoSecretariaOrigen').value;
+
+            if (!busqueda && !secretariaOrigen) {
+                this.showToast('Ingrese un término de búsqueda o seleccione una secretaría', 'warning');
+                return;
+            }
+
+            this.showToast('Buscando artículos...', 'info');
+
+            // Construir URL con parámetros
+            let url = '/api/inventario?limit=100';
+            if (busqueda) {
+                url += `&search=${encodeURIComponent(busqueda)}`;
+            }
+            if (secretariaOrigen) {
+                url += `&secretaria=${encodeURIComponent(secretariaOrigen)}`;
+            }
+
+            const response = await this.apiCall(url);
+            const items = response.data;
+
+            // Mostrar resultados
+            document.getElementById('trasladoResultadosContainer').style.display = 'block';
+            document.getElementById('traslado-total').textContent = items.length;
+
+            const tbody = document.getElementById('traslado-body');
+            tbody.innerHTML = '';
+
+            if (items.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" class="text-center">No se encontraron artículos</td></tr>';
+                return;
+            }
+
+            items.forEach(item => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${item.id}</td>
+                    <td>${item.numero_inventario}</td>
+                    <td>${item.descripcion.substring(0, 50)}${item.descripcion.length > 50 ? '...' : ''}</td>
+                    <td>${item.secretaria}</td>
+                    <td>${item.resguardante}</td>
+                    <td>${this.formatCurrency(item.costo)}</td>
+                    <td><span class="status-badge ${item.estatus}">${this.formatStatus(item.estatus)}</span></td>
+                    <td>
+                        <button class="btn btn-sm btn-warning" onclick="dashboardApp.abrirModalTraslado(${item.id}, '${item.numero_inventario}', '${item.descripcion.replace(/'/g, "\\'")}', '${item.secretaria}')" title="Trasladar">
+                            <i class="fas fa-exchange-alt"></i> Trasladar
+                        </button>
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+
+            this.showToast(`${items.length} artículos encontrados`, 'success');
+
+        } catch (error) {
+            console.error('Error buscando artículos:', error);
+            this.showToast('Error al buscar artículos', 'error');
+        }
+    }
+
+    abrirModalTraslado(id, numeroInventario, descripcion, secretariaActual) {
+        document.getElementById('trasladoArticuloId').value = id;
+        document.getElementById('trasladoModalNumero').textContent = numeroInventario;
+        document.getElementById('trasladoModalDescripcion').textContent = descripcion;
+        document.getElementById('trasladoModalSecretariaActual').textContent = secretariaActual;
+
+        // Limpiar campos
+        document.getElementById('trasladoSecretariaDestino').value = '';
+        document.getElementById('trasladoMotivo').value = '';
+
+        // Mostrar modal
+        document.getElementById('trasladoModal').style.display = 'flex';
+    }
+
+    cerrarModalTraslado() {
+        document.getElementById('trasladoModal').style.display = 'none';
+    }
+
+    async confirmarTraslado() {
+        try {
+            const id = document.getElementById('trasladoArticuloId').value;
+            const secretariaDestino = document.getElementById('trasladoSecretariaDestino').value;
+            const motivo = document.getElementById('trasladoMotivo').value;
+            const secretariaActual = document.getElementById('trasladoModalSecretariaActual').textContent;
+
+            if (!secretariaDestino) {
+                this.showToast('Seleccione una secretaría de destino', 'warning');
+                return;
+            }
+
+            if (secretariaDestino === secretariaActual) {
+                this.showToast('La secretaría destino debe ser diferente a la actual', 'warning');
+                return;
+            }
+
+            this.showToast('Procesando traslado...', 'info');
+
+            const response = await fetch(`/api/inventario/${id}/trasladar`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('token')}`
+                },
+                body: JSON.stringify({
+                    secretaria_destino: secretariaDestino,
+                    motivo_traslado: motivo
+                })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                this.showToast(result.message, 'success');
+                this.cerrarModalTraslado();
+                // Recargar la búsqueda actual
+                this.buscarArticulosTraslado();
+            } else {
+                this.showToast(result.message || 'Error al trasladar el artículo', 'error');
+            }
+
         } catch (error) {
             console.error('Error:', error);
             this.showToast('Error de conexión', 'error');
@@ -1121,6 +1373,137 @@ class DashboardSecretariasApp {
         return statusMap[status] || status;
     }
 
+    async downloadQR(itemId, numeroInventario) {
+        try {
+            this.showToast('Generando código QR...', 'info');
+
+            // Llamar al endpoint para obtener el QR
+            const response = await this.apiCall(`/api/inventario/${itemId}/qr`);
+
+            if (response.success && response.data.qr_image) {
+                // Crear un enlace temporal para descargar la imagen
+                const link = document.createElement('a');
+                link.href = response.data.qr_image;
+                link.download = `QR_${numeroInventario}.png`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+
+                this.showToast(`Código QR descargado: ${numeroInventario}`, 'success');
+            } else {
+                throw new Error('No se pudo generar el código QR');
+            }
+        } catch (error) {
+            console.error('Error al descargar QR:', error);
+            this.showToast('Error al generar el código QR', 'error');
+        }
+    }
+
+    // Funciones de Historial del Sistema
+    async cargarHistorial() {
+        try {
+            const tipo = document.getElementById('historialTipo').value;
+            const fechaDesde = document.getElementById('historialFechaDesde').value;
+            const fechaHasta = document.getElementById('historialFechaHasta').value;
+            const limite = document.getElementById('historialLimite').value;
+
+            this.showToast('Cargando historial...', 'info');
+
+            // Construir URL con parámetros
+            let url = `/api/historial?limite=${limite}`;
+            if (tipo) url += `&tipo=${encodeURIComponent(tipo)}`;
+            if (fechaDesde) url += `&fecha_desde=${encodeURIComponent(fechaDesde)}`;
+            if (fechaHasta) url += `&fecha_hasta=${encodeURIComponent(fechaHasta)}`;
+
+            const response = await this.apiCall(url);
+            const registros = response.data;
+
+            // Actualizar contador
+            document.getElementById('historialTotal').textContent = `${registros.length} registros`;
+
+            const tbody = document.getElementById('historial-body');
+            tbody.innerHTML = '';
+
+            if (registros.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" class="text-center">No se encontraron registros</td></tr>';
+                return;
+            }
+
+            registros.forEach(registro => {
+                const row = document.createElement('tr');
+                // Formatear fecha correctamente considerando que SQLite guarda en UTC
+                const fechaDate = new Date(registro.fecha_accion + ' UTC');
+                const fecha = fechaDate.toLocaleString('es-MX', {
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: false
+                });
+                const tipoLabel = this.formatTipoAccion(registro.tipo_accion);
+                const tipoClass = this.getTipoAccionClass(registro.tipo_accion);
+
+                row.innerHTML = `
+                    <td>${fecha}</td>
+                    <td><span class="badge ${tipoClass}">${tipoLabel}</span></td>
+                    <td>${registro.descripcion}</td>
+                    <td>${registro.usuario_responsable_nombre || registro.usuario_nombre || 'N/A'}</td>
+                    <td>${registro.entidad_tipo ? `${registro.entidad_tipo} #${registro.entidad_id}` : '-'}</td>
+                    <td>${registro.secretaria_origen || registro.secretaria_destino ? `${registro.secretaria_origen || '-'} → ${registro.secretaria_destino || '-'}` : '-'}</td>
+                    <td>${registro.detalles_adicionales ? '<i class="fas fa-info-circle" title="' + registro.detalles_adicionales + '"></i>' : '-'}</td>
+                `;
+                tbody.appendChild(row);
+            });
+
+            this.showToast(`${registros.length} registros cargados`, 'success');
+
+        } catch (error) {
+            console.error('Error cargando historial:', error);
+            this.showToast('Error al cargar el historial', 'error');
+        }
+    }
+
+    limpiarFiltrosHistorial() {
+        document.getElementById('historialTipo').value = '';
+        document.getElementById('historialFechaDesde').value = '';
+        document.getElementById('historialFechaHasta').value = '';
+        document.getElementById('historialLimite').value = '100';
+        document.getElementById('historial-body').innerHTML = '<tr><td colspan="7" class="text-center">Utilice los filtros para cargar el historial</td></tr>';
+        document.getElementById('historialTotal').textContent = '0 registros';
+    }
+
+    formatTipoAccion(tipo) {
+        const tipos = {
+            'creacion_usuario': 'Creación Usuario',
+            'registro_mueble': 'Registro Mueble',
+            'traslado_mueble': 'Traslado Mueble',
+            'modificacion_mueble': 'Modificación Mueble',
+            'eliminacion_mueble': 'Eliminación Mueble',
+            'login': 'Inicio Sesión',
+            'logout': 'Cierre Sesión',
+            'activacion_usuario': 'Activación Usuario',
+            'desactivacion_usuario': 'Desactivación Usuario'
+        };
+        return tipos[tipo] || tipo;
+    }
+
+    getTipoAccionClass(tipo) {
+        const clases = {
+            'creacion_usuario': 'badge-success',
+            'registro_mueble': 'badge-primary',
+            'traslado_mueble': 'badge-warning',
+            'modificacion_mueble': 'badge-info',
+            'eliminacion_mueble': 'badge-danger',
+            'login': 'badge-secondary',
+            'logout': 'badge-secondary',
+            'activacion_usuario': 'badge-success',
+            'desactivacion_usuario': 'badge-danger'
+        };
+        return clases[tipo] || 'badge-secondary';
+    }
+
     async loadReportesData() {
         try {
             // Mostrar mensaje de carga
@@ -1480,4 +1863,16 @@ window.resetUserForm = function() {
 
 window.toggleUserStatus = function(userId, activate) {
     window.dashboardApp.toggleUserStatus(userId, activate);
+};
+
+window.openEditUserModal = function(id, usuario, nombreCompleto, email, rol, secretaria, activo) {
+    window.dashboardApp.openEditUserModal(id, usuario, nombreCompleto, email, rol, secretaria, activo);
+};
+
+window.closeEditUserModal = function() {
+    window.dashboardApp.closeEditUserModal();
+};
+
+window.saveUserEdit = function() {
+    window.dashboardApp.saveUserEdit();
 };
