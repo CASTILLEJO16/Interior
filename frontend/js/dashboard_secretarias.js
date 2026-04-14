@@ -160,6 +160,19 @@ class DashboardSecretariasApp {
                 secretariaDisplay.value = 'Sin Secretaría';
             }
         }
+
+        // Asegurar que campos de categoría y subcategoría sean visibles para todos
+        const categoriaSelect = document.getElementById('categoria');
+        const subcategoriaSelect = document.getElementById('subcategoria');
+        if (categoriaSelect) {
+            categoriaSelect.style.display = 'block';
+            categoriaSelect.parentElement.style.display = 'flex';
+        }
+        if (subcategoriaSelect) {
+            subcategoriaSelect.style.display = 'block';
+            subcategoriaSelect.parentElement.style.display = 'flex';
+        }
+        console.log('Campos de categoría/subcategoría verificados para usuario:', this.currentUser.rol);
     }
 
     setupEventListeners() {
@@ -438,9 +451,14 @@ class DashboardSecretariasApp {
 
     createSecretariaRow(item) {
         const row = document.createElement('tr');
+        const categoriaBadge = item.categoria ? `<span class="category-badge">${item.categoria}</span>` : '-';
+        const subcategoriaBadge = item.subcategoria ? `<span class="subcategory-badge">${item.subcategoria}</span>` : '-';
         row.innerHTML = `
             <td>${item.numero_inventario}</td>
-            <td>${item.descripcion.substring(0, 50)}${item.descripcion.length > 50 ? '...' : ''}</td>
+            <td><strong>${item.nombre_articulo || 'Sin nombre'}</strong></td>
+            <td>${categoriaBadge}</td>
+            <td>${subcategoriaBadge}</td>
+            <td>${item.descripcion.substring(0, 40)}${item.descripcion.length > 40 ? '...' : ''}</td>
             <td>${item.resguardante}</td>
             <td>${this.formatCurrency(item.costo)}</td>
             <td><span class="status-badge ${item.estatus}">${this.formatStatus(item.estatus)}</span></td>
@@ -565,6 +583,11 @@ class DashboardSecretariasApp {
                             onclick="toggleUserStatus(${user.id}, ${!isActive})"
                             ${user.id === this.currentUser.id ? 'disabled title="No puede desactivar su propia cuenta"' : ''}>
                         <i class="fas ${isActive ? 'fa-ban' : 'fa-check'}"></i>
+                    </button>
+                    <button class="btn btn-sm btn-danger"
+                            onclick="showDeleteUserModal(${user.id}, '${user.usuario}', '${user.nombre_completo}')"
+                            ${user.id === this.currentUser.id ? 'disabled title="No puede eliminar su propia cuenta"' : 'title="Eliminar usuario"'}>
+                        <i class="fas fa-trash"></i>
                     </button>
                 </div>
             </td>
@@ -717,6 +740,63 @@ class DashboardSecretariasApp {
                 this.loadUsuariosData(); // Recargar tabla
             } else {
                 this.showToast(result.message || 'Error al actualizar usuario', 'error');
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            this.showToast('Error de conexión', 'error');
+        }
+    }
+
+    // Función para mostrar modal de eliminación de usuario
+    showDeleteUserModal(userId, usuario, nombreCompleto) {
+        // No permitir eliminar el propio usuario
+        if (userId === this.currentUser.id) {
+            this.showToast('No puede eliminar su propia cuenta', 'error');
+            return;
+        }
+
+        // Guardar ID para la confirmación
+        this.deleteUserId = userId;
+
+        // Mostrar información del usuario en el modal
+        document.getElementById('deleteUserId').textContent = userId;
+        document.getElementById('deleteUserName').textContent = usuario;
+        document.getElementById('deleteUserFullName').textContent = nombreCompleto;
+
+        // Mostrar modal
+        const modal = document.getElementById('deleteUserModal');
+        modal.style.display = 'flex';
+        modal.classList.add('active');
+    }
+
+    // Función para cerrar modal de eliminación de usuario
+    closeDeleteUserModal() {
+        const modal = document.getElementById('deleteUserModal');
+        modal.style.display = 'none';
+        modal.classList.remove('active');
+        this.deleteUserId = null;
+    }
+
+    // Función para confirmar eliminación de usuario
+    async confirmDeleteUser() {
+        if (!this.deleteUserId) return;
+
+        try {
+            const response = await fetch(`/api/usuarios/${this.deleteUserId}`, {
+                method: 'DELETE',
+                headers: {
+                    'Authorization': `Bearer ${this.token}`
+                }
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                this.showToast('Usuario eliminado exitosamente', 'success');
+                this.closeDeleteUserModal();
+                this.loadUsuariosData(); // Recargar tabla
+            } else {
+                this.showToast(result.message || 'Error al eliminar usuario', 'error');
             }
         } catch (error) {
             console.error('Error:', error);
@@ -945,7 +1025,13 @@ class DashboardSecretariasApp {
             form.reset();
             document.getElementById('imagePreview').style.display = 'none';
             document.getElementById('previewImg').src = '';
-            
+
+            // Reset subcategoria dropdown
+            const subcategoriaSelect = document.getElementById('subcategoria');
+            if (subcategoriaSelect) {
+                subcategoriaSelect.innerHTML = '<option value="">Primero seleccione una categoría</option>';
+            }
+
             // Set current date
             const fechaAlta = document.getElementById('fechaAlta');
             if (fechaAlta) {
@@ -1875,4 +1961,51 @@ window.closeEditUserModal = function() {
 
 window.saveUserEdit = function() {
     window.dashboardApp.saveUserEdit();
+};
+
+window.deleteUser = function(userId) {
+    window.dashboardApp.deleteUser(userId);
+};
+
+window.showDeleteUserModal = function(userId, usuario, nombreCompleto) {
+    window.dashboardApp.showDeleteUserModal(userId, usuario, nombreCompleto);
+};
+
+window.closeDeleteUserModal = function() {
+    window.dashboardApp.closeDeleteUserModal();
+};
+
+window.confirmDeleteUser = function() {
+    window.dashboardApp.confirmDeleteUser();
+};
+
+// Función para actualizar subcategorías según la categoría seleccionada
+window.actualizarSubcategorias = function() {
+    const categoriaSelect = document.getElementById('categoria');
+    const subcategoriaSelect = document.getElementById('subcategoria');
+
+    if (!categoriaSelect || !subcategoriaSelect) return;
+
+    const categoria = categoriaSelect.value;
+
+    // Definir subcategorías por categoría
+    const subcategorias = {
+        'Mobiliario': ['Silla', 'Escritorio', 'Archivero', 'Librero', 'Mesa', 'Sofá', 'Mueble de almacenamiento'],
+        'Equipos Electrónicos': ['Computadora', 'Monitor', 'Impresora', 'Scanner', 'Proyector', 'Teléfono', 'Tablet', 'Laptop'],
+        'Vehículos': ['Camioneta', 'Automóvil', 'Motocicleta'],
+        'Equipos de Oficina': ['Calculadora', 'Engrapadora', 'Guillotina', 'Laminadora', 'Perforadora', 'Rotuladora']
+    };
+
+    // Limpiar opciones actuales
+    subcategoriaSelect.innerHTML = '<option value="">Seleccione una subcategoría</option>';
+
+    // Si hay una categoría seleccionada, agregar sus subcategorías
+    if (categoria && subcategorias[categoria]) {
+        subcategorias[categoria].forEach(sub => {
+            const option = document.createElement('option');
+            option.value = sub;
+            option.textContent = sub;
+            subcategoriaSelect.appendChild(option);
+        });
+    }
 };

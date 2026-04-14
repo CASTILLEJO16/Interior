@@ -118,12 +118,18 @@ class RegistroApp {
         if (form) {
             form.reset();
             this.setDefaultDate();
-            
+
             const preview = document.getElementById('imagePreview');
             const previewImg = document.getElementById('previewImg');
             if (preview && previewImg) {
                 preview.style.display = 'none';
                 previewImg.src = '';
+            }
+
+            // Reset subcategoria dropdown
+            const subcategoriaSelect = document.getElementById('subcategoria');
+            if (subcategoriaSelect) {
+                subcategoriaSelect.innerHTML = '<option value="">Primero seleccione una categoría</option>';
             }
         }
     }
@@ -172,6 +178,37 @@ window.resetForm = function() {
     const app = window.registroApp;
     if (app) {
         app.resetForm();
+    }
+};
+
+// Función para actualizar subcategorías según la categoría seleccionada
+window.actualizarSubcategorias = function() {
+    const categoriaSelect = document.getElementById('categoria');
+    const subcategoriaSelect = document.getElementById('subcategoria');
+
+    if (!categoriaSelect || !subcategoriaSelect) return;
+
+    const categoria = categoriaSelect.value;
+
+    // Definir subcategorías por categoría
+    const subcategorias = {
+        'Mobiliario': ['Silla', 'Escritorio', 'Archivero', 'Librero', 'Mesa', 'Sofá', 'Mueble de almacenamiento'],
+        'Equipos Electrónicos': ['Computadora', 'Monitor', 'Impresora', 'Scanner', 'Proyector', 'Teléfono', 'Tablet', 'Laptop'],
+        'Vehículos': ['Camioneta', 'Automóvil', 'Motocicleta'],
+        'Equipos de Oficina': ['Calculadora', 'Engrapadora', 'Guillotina', 'Laminadora', 'Perforadora', 'Rotuladora']
+    };
+
+    // Limpiar opciones actuales
+    subcategoriaSelect.innerHTML = '<option value="">Seleccione una subcategoría</option>';
+
+    // Si hay una categoría seleccionada, agregar sus subcategorías
+    if (categoria && subcategorias[categoria]) {
+        subcategorias[categoria].forEach(sub => {
+            const option = document.createElement('option');
+            option.value = sub;
+            option.textContent = sub;
+            subcategoriaSelect.appendChild(option);
+        });
     }
 };
 

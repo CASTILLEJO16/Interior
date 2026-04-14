@@ -140,6 +140,9 @@ async function initializeDatabase() {
                     CREATE TABLE IF NOT EXISTS inventario (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         numero_inventario TEXT UNIQUE NOT NULL,
+                        nombre_articulo TEXT NOT NULL,
+                        categoria TEXT,
+                        subcategoria TEXT,
                         secretaria TEXT NOT NULL,
                         fecha_alta DATE NOT NULL,
                         descripcion TEXT NOT NULL,
@@ -153,6 +156,34 @@ async function initializeDatabase() {
                         FOREIGN KEY (usuario_registro) REFERENCES usuarios(id)
                     )
                 `);
+
+                // Migración: agregar columnas nuevas si no existen (para bases de datos antiguas)
+                try {
+                    await run(`ALTER TABLE inventario ADD COLUMN nombre_articulo TEXT NOT NULL DEFAULT 'Sin nombre'`);
+                    console.log('✅ Columna nombre_articulo agregada a tabla inventario');
+                } catch (err) {
+                    if (!err.message.includes('duplicate column') && !err.message.includes('already exists')) {
+                        console.error('Error al agregar columna nombre_articulo:', err);
+                    }
+                }
+
+                try {
+                    await run(`ALTER TABLE inventario ADD COLUMN categoria TEXT`);
+                    console.log('✅ Columna categoria agregada a tabla inventario');
+                } catch (err) {
+                    if (!err.message.includes('duplicate column') && !err.message.includes('already exists')) {
+                        console.error('Error al agregar columna categoria:', err);
+                    }
+                }
+
+                try {
+                    await run(`ALTER TABLE inventario ADD COLUMN subcategoria TEXT`);
+                    console.log('✅ Columna subcategoria agregada a tabla inventario');
+                } catch (err) {
+                    if (!err.message.includes('duplicate column') && !err.message.includes('already exists')) {
+                        console.error('Error al agregar columna subcategoria:', err);
+                    }
+                }
 
                 await run(`
                     CREATE TABLE IF NOT EXISTS movimientos_inventario (
@@ -422,9 +453,9 @@ app.get('/api/inventario', authenticateToken, authorizeAdmin, async (req, res) =
         let params = [];
 
         if (search) {
-            query += ` AND (i.numero_inventario LIKE ? OR i.descripcion LIKE ? OR i.resguardante LIKE ?)`;
+            query += ` AND (i.numero_inventario LIKE ? OR i.nombre_articulo LIKE ? OR i.descripcion LIKE ? OR i.resguardante LIKE ?)`;
             const searchParam = `%${search}%`;
-            params.push(searchParam, searchParam, searchParam);
+            params.push(searchParam, searchParam, searchParam, searchParam);
         }
 
         if (secretaria) {
@@ -442,9 +473,9 @@ app.get('/api/inventario', authenticateToken, authorizeAdmin, async (req, res) =
         let countParams = [];
 
         if (search) {
-            countQuery += ` AND (i.numero_inventario LIKE ? OR i.descripcion LIKE ? OR i.resguardante LIKE ?)`;
+            countQuery += ` AND (i.numero_inventario LIKE ? OR i.nombre_articulo LIKE ? OR i.descripcion LIKE ? OR i.resguardante LIKE ?)`;
             const searchParam = `%${search}%`;
-            countParams.push(searchParam, searchParam, searchParam);
+            countParams.push(searchParam, searchParam, searchParam, searchParam);
         }
 
         if (secretaria) {
@@ -479,6 +510,9 @@ app.post('/api/inventario', authenticateToken, upload.single('imagen'), async (r
     try {
         const {
             numero_inventario,
+            nombre_articulo,
+            categoria,
+            subcategoria,
             fecha_alta,
             descripcion,
             costo,
@@ -512,6 +546,7 @@ app.post('/api/inventario', authenticateToken, upload.single('imagen'), async (r
         // Validar campos requeridos con mensajes específicos
         const camposFaltantes = [];
         if (!numero_inventario || numero_inventario.trim() === '') camposFaltantes.push('Número de Inventario');
+        if (!nombre_articulo || nombre_articulo.trim() === '') camposFaltantes.push('Nombre del Artículo');
         if (!fecha_alta) camposFaltantes.push('Fecha de Alta');
         if (!descripcion || descripcion.trim() === '') camposFaltantes.push('Descripción');
         if (!costo || isNaN(parseFloat(costo))) camposFaltantes.push('Costo');
@@ -537,10 +572,10 @@ app.post('/api/inventario', authenticateToken, upload.single('imagen'), async (r
         const imagen = req.file ? `/uploads/${req.file.filename}` : null;
 
         const result = await run(`
-            INSERT INTO inventario 
-            (numero_inventario, secretaria, fecha_alta, descripcion, costo, resguardante, imagen, usuario_registro)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        `, [numero_inventario, secretaria, fecha_alta, descripcion, parseFloat(costo), resguardante, imagen, req.user.id]);
+            INSERT INTO inventario
+            (numero_inventario, nombre_articulo, categoria, subcategoria, secretaria, fecha_alta, descripcion, costo, resguardante, imagen, usuario_registro)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [numero_inventario, nombre_articulo, categoria || null, subcategoria || null, secretaria, fecha_alta, descripcion, parseFloat(costo), resguardante, imagen, req.user.id]);
 
         // Registrar movimiento
         await run(`
@@ -552,14 +587,14 @@ app.post('/api/inventario', authenticateToken, upload.single('imagen'), async (r
         // Registrar en historial del sistema
         await registrarHistorial(
             'registro_mueble',
-            `Mueble registrado: ${numero_inventario} - ${descripcion.substring(0, 50)}... en ${secretaria}`,
+            `Mueble registrado: ${numero_inventario} - ${nombre_articulo} en ${secretaria}`,
             result.lastID,
             'mueble',
             req.user.id,
             req.user.usuario,
             null,
             secretaria,
-            { numero_inventario, descripcion, secretaria, costo, resguardante }
+            { numero_inventario, nombre_articulo, categoria, subcategoria, descripcion, secretaria, costo, resguardante }
         );
 
         res.status(201).json({
@@ -1193,6 +1228,70 @@ app.put('/api/usuarios/:id', authenticateToken, authorizeAdmin, async (req, res)
         res.status(500).json({
             success: false,
             message: 'Error al actualizar el usuario'
+        });
+    }
+});
+
+// Endpoint para eliminar usuario (solo admin)
+app.delete('/api/usuarios/:id', authenticateToken, authorizeAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        // Verificar que no se elimine a sí mismo
+        if (parseInt(id) === req.user.id) {
+            return res.status(400).json({
+                success: false,
+                message: 'No puede eliminar su propia cuenta'
+            });
+        }
+
+        // Verificar que el usuario existe
+        const user = await get('SELECT id, usuario, nombre_completo FROM usuarios WHERE id = ?', [id]);
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: 'Usuario no encontrado'
+            });
+        }
+
+        // Verificar que hay al menos un admin activo
+        const adminCount = await get('SELECT COUNT(*) as count FROM usuarios WHERE rol = "admin" AND activo = 1');
+        if (adminCount.count <= 1) {
+            const userToDelete = await get('SELECT rol FROM usuarios WHERE id = ?', [id]);
+            if (userToDelete.rol === 'admin') {
+                return res.status(400).json({
+                    success: false,
+                    message: 'No puede eliminar al único administrador activo'
+                });
+            }
+        }
+
+        // Eliminar usuario
+        await run('DELETE FROM usuarios WHERE id = ?', [id]);
+
+        // Registrar en historial
+        await registrarHistorial(
+            'eliminacion_usuario',
+            `Usuario eliminado: ${user.usuario} - ${user.nombre_completo}`,
+            parseInt(id),
+            'usuario',
+            req.user.id,
+            req.user.usuario,
+            null,
+            null,
+            { usuario_eliminado: user.usuario, nombre_completo: user.nombre_completo }
+        );
+
+        res.json({
+            success: true,
+            message: 'Usuario eliminado exitosamente'
+        });
+
+    } catch (error) {
+        console.error('Error al eliminar usuario:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error al eliminar el usuario'
         });
     }
 });
