@@ -22,7 +22,14 @@ app.use((req, res, next) => {
 
 // Configuración CORS y body parsing
 app.use(cors({
-    origin: ['http://localhost:3000', 'http://127.0.0.1:3000'],
+    origin: [
+        'http://localhost:3000',
+        'http://127.0.0.1:3000',
+        'http://localhost:5173',
+        'http://127.0.0.1:5173',
+        'http://localhost:4173',
+        'http://127.0.0.1:4173'
+    ],
     credentials: true
 }));
 app.use(express.json({ limit: '10mb' }));
@@ -153,6 +160,7 @@ async function initializeDatabase() {
                         fecha_registro DATETIME DEFAULT CURRENT_TIMESTAMP,
                         ultima_actualizacion DATETIME,
                         estatus TEXT DEFAULT 'activo' CHECK(estatus IN ('activo', 'dado_de_baja', 'en_mantenimiento')),
+                        estado_uso TEXT DEFAULT 'en_uso' CHECK(estado_uso IN ('en_uso', 'en_almacen')),
                         FOREIGN KEY (usuario_registro) REFERENCES usuarios(id)
                     )
                 `);
@@ -182,6 +190,15 @@ async function initializeDatabase() {
                 } catch (err) {
                     if (!err.message.includes('duplicate column') && !err.message.includes('already exists')) {
                         console.error('Error al agregar columna subcategoria:', err);
+                    }
+                }
+
+                try {
+                    await run(`ALTER TABLE inventario ADD COLUMN estado_uso TEXT DEFAULT 'en_uso' CHECK(estado_uso IN ('en_uso', 'en_almacen'))`);
+                    console.log('✅ Columna estado_uso agregada a tabla inventario');
+                } catch (err) {
+                    if (!err.message.includes('duplicate column') && !err.message.includes('already exists')) {
+                        console.error('Error al agregar columna estado_uso:', err);
                     }
                 }
 
@@ -441,7 +458,7 @@ app.get('/api/verify-token', authenticateToken, (req, res) => {
 // Rutas del inventario
 app.get('/api/inventario', authenticateToken, authorizeAdmin, async (req, res) => {
     try {
-        const { page = 1, limit = 10, search = '', secretaria = '' } = req.query;
+        const { page = 1, limit = 10, search = '', secretaria = '', estado_uso = '' } = req.query;
         const offset = (page - 1) * limit;
 
         let query = `
@@ -463,6 +480,11 @@ app.get('/api/inventario', authenticateToken, authorizeAdmin, async (req, res) =
             params.push(secretaria);
         }
 
+        if (estado_uso) {
+            query += ` AND i.estado_uso = ?`;
+            params.push(estado_uso);
+        }
+
         query += ` ORDER BY i.fecha_registro DESC LIMIT ? OFFSET ?`;
         params.push(parseInt(limit), parseInt(offset));
 
@@ -481,6 +503,11 @@ app.get('/api/inventario', authenticateToken, authorizeAdmin, async (req, res) =
         if (secretaria) {
             countQuery += ` AND i.secretaria = ?`;
             countParams.push(secretaria);
+        }
+
+        if (estado_uso) {
+            countQuery += ` AND i.estado_uso = ?`;
+            countParams.push(estado_uso);
         }
 
         const countResult = await get(countQuery, countParams);
@@ -517,13 +544,17 @@ app.post('/api/inventario', authenticateToken, upload.single('imagen'), async (r
             descripcion,
             costo,
             resguardante,
-            secretaria: secretariaBody
+            secretaria: secretariaBody,
+            estado_uso
         } = req.body;
 
         let secretaria;
 
-        // Si es admin, puede especificar la secretaría en el body
-        if (req.user.rol === 'admin') {
+        // Si el artículo va al almacén, no asignar secretaría
+        if (estado_uso === 'en_almacen') {
+            secretaria = 'Almacén';
+        } else if (req.user.rol === 'admin') {
+            // Si es admin, puede especificar la secretaría en el body
             if (secretariaBody) {
                 secretaria = secretariaBody;
             } else {
@@ -573,9 +604,9 @@ app.post('/api/inventario', authenticateToken, upload.single('imagen'), async (r
 
         const result = await run(`
             INSERT INTO inventario
-            (numero_inventario, nombre_articulo, categoria, subcategoria, secretaria, fecha_alta, descripcion, costo, resguardante, imagen, usuario_registro)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, [numero_inventario, nombre_articulo, categoria || null, subcategoria || null, secretaria, fecha_alta, descripcion, parseFloat(costo), resguardante, imagen, req.user.id]);
+            (numero_inventario, nombre_articulo, categoria, subcategoria, secretaria, fecha_alta, descripcion, costo, resguardante, imagen, usuario_registro, estado_uso)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [numero_inventario, nombre_articulo, categoria || null, subcategoria || null, secretaria, fecha_alta, descripcion, parseFloat(costo), resguardante, imagen, req.user.id, estado_uso || 'en_uso']);
 
         // Registrar movimiento
         await run(`
@@ -885,6 +916,106 @@ app.put('/api/inventario/:id/trasladar', authenticateToken, authorizeAdmin, asyn
         res.status(500).json({
             success: false,
             message: 'Error al trasladar el artículo'
+        });
+    }
+});
+
+// Endpoint para mover artículo entre almacén y secretaría
+app.put('/api/inventario/:id/mover', authenticateToken, authorizeAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { estado_uso, secretaria } = req.body;
+
+        // Validar estado_uso
+        if (!estado_uso || !['en_uso', 'en_almacen'].includes(estado_uso)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Estado de uso inválido. Debe ser "en_uso" o "en_almacen"'
+            });
+        }
+
+        // Obtener datos del artículo actual
+        const item = await get('SELECT * FROM inventario WHERE id = ?', [id]);
+
+        if (!item) {
+            return res.status(404).json({
+                success: false,
+                message: 'Artículo no encontrado'
+            });
+        }
+
+        const estadoAnterior = item.estado_uso;
+        const secretariaAnterior = item.secretaria;
+
+        // Si se mueve a en_uso, debe tener secretaría
+        if (estado_uso === 'en_uso' && !secretaria && !item.secretaria) {
+            return res.status(400).json({
+                success: false,
+                message: 'Debe especificar una secretaría al mover el artículo a "En Uso"'
+            });
+        }
+
+        // Construir actualización
+        const updates = ['estado_uso = ?', 'ultima_actualizacion = datetime(\'now\')'];
+        const params = [estado_uso];
+
+        if (estado_uso === 'en_uso' && secretaria) {
+            updates.push('secretaria = ?');
+            params.push(secretaria);
+        }
+
+        params.push(id);
+        await run(`UPDATE inventario SET ${updates.join(', ')} WHERE id = ?`, params);
+
+        // Registrar movimiento
+        let descripcionMovimiento = '';
+        if (estado_uso === 'en_almacen') {
+            descripcionMovimiento = `Artículo ${item.numero_inventario} movido de ${secretariaAnterior} al Almacén`;
+        } else if (estado_uso === 'en_uso' && secretaria) {
+            descripcionMovimiento = `Artículo ${item.numero_inventario} asignado del Almacén a ${secretaria}`;
+        } else {
+            descripcionMovimiento = `Artículo ${item.numero_inventario} cambió de estado: ${estadoAnterior} → ${estado_uso}`;
+        }
+
+        await run(`
+            INSERT INTO movimientos_inventario
+            (id_inventario, tipo_movimiento, descripcion_movimiento, usuario_movimiento)
+            VALUES (?, 'traslado', ?, ?)
+        `, [id, descripcionMovimiento, req.user.id]);
+
+        // Registrar en historial
+        await registrarHistorial(
+            'cambio_estado_uso',
+            descripcionMovimiento,
+            item.id,
+            'mueble',
+            req.user.id,
+            req.user.usuario,
+            estadoAnterior === 'en_almacen' ? 'Almacén' : secretariaAnterior,
+            estado_uso === 'en_almacen' ? 'Almacén' : (secretaria || secretariaAnterior),
+            { numero_inventario: item.numero_inventario, estado_anterior: estadoAnterior, estado_nuevo: estado_uso }
+        );
+
+        res.json({
+            success: true,
+            message: estado_uso === 'en_almacen'
+                ? 'Artículo movido a Almacén exitosamente'
+                : 'Artículo asignado a secretaría exitosamente',
+            data: {
+                id: item.id,
+                numero_inventario: item.numero_inventario,
+                estado_uso_anterior: estadoAnterior,
+                estado_uso_nuevo: estado_uso,
+                secretaria_anterior: secretariaAnterior,
+                secretaria_nueva: estado_uso === 'en_uso' && secretaria ? secretaria : secretariaAnterior
+            }
+        });
+
+    } catch (error) {
+        console.error('Error al mover artículo:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error al mover el artículo'
         });
     }
 });
@@ -1298,31 +1429,80 @@ app.delete('/api/usuarios/:id', authenticateToken, authorizeAdmin, async (req, r
 
 // Rutas de archivos estáticos - DEBEN ir al final para no interferir con API
 // Servir archivos estáticos desde la carpeta frontend
-app.use(express.static(path.join(__dirname, '../frontend')));
+// Frontend (React + Vite):
+// - ProducciÃ³n: ../frontend/dist (Vite build)
+// - Fallback: ../frontend-legacy (HTML original, por si no estÃ¡ compilado aÃºn)
+const FRONTEND_DIST = path.join(__dirname, '../frontend/dist');
+const FRONTEND_LEGACY = path.join(__dirname, '../frontend-legacy');
+const distIndex = path.join(FRONTEND_DIST, 'index.html');
+const hasDist = fs.existsSync(distIndex);
+const hasLegacy = fs.existsSync(path.join(FRONTEND_LEGACY, 'login.html'));
+const staticRoot = hasDist ? FRONTEND_DIST : hasLegacy ? FRONTEND_LEGACY : path.join(__dirname, '../frontend');
+
+app.use(express.static(staticRoot));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, '../frontend/login.html'));
+    if (hasDist) {
+        return res.sendFile(distIndex);
+    }
+    if (hasLegacy) {
+        return res.sendFile(path.join(FRONTEND_LEGACY, 'login.html'));
+    }
+    return res
+        .status(200)
+        .send('Frontend no compilado. Ejecuta: cd frontend && npm install && npm run dev (o npm run build).');
 });
 
 app.get('/login.html', (req, res) => {
-    res.sendFile(path.join(__dirname, '../frontend/login.html'));
+    if (hasLegacy) {
+        return res.sendFile(path.join(FRONTEND_LEGACY, 'login.html'));
+    }
+    if (hasDist) {
+        return res.sendFile(distIndex);
+    }
+    return res.redirect('/');
 });
 
 app.get('/dashboard', (req, res) => {
-    res.sendFile(path.join(__dirname, '../frontend/dashboard_secretarias.html'));
+    if (hasLegacy) {
+        return res.sendFile(path.join(FRONTEND_LEGACY, 'dashboard_secretarias.html'));
+    }
+    if (hasDist) {
+        return res.sendFile(distIndex);
+    }
+    return res.redirect('/');
 });
 
 app.get('/dashboard_secretarias.html', authenticateHTML, (req, res) => {
-    res.sendFile(path.join(__dirname, '../frontend/dashboard_secretarias.html'));
+    if (hasLegacy) {
+        return res.sendFile(path.join(FRONTEND_LEGACY, 'dashboard_secretarias.html'));
+    }
+    if (hasDist) {
+        return res.sendFile(distIndex);
+    }
+    return res.redirect('/');
 });
 
 // Ruta para usuarios estándar (solo registro)
 app.get('/registro.html', authenticateHTML, (req, res) => {
-    res.sendFile(path.join(__dirname, '../frontend/registro.html'));
+    if (hasLegacy) {
+        return res.sendFile(path.join(FRONTEND_LEGACY, 'registro.html'));
+    }
+    if (hasDist) {
+        return res.sendFile(distIndex);
+    }
+    return res.redirect('/');
 });
 
 // Manejo de errores
+// SPA fallback (solo cuando hay build de Vite)
+if (hasDist) {
+    app.get('*', (req, res) => {
+        res.sendFile(distIndex);
+    });
+}
+
 app.use(errorHandler);
 
 // Iniciar servidor
@@ -1331,7 +1511,7 @@ async function startServer() {
     
     const server = app.listen(PORT, () => {
         console.log(`? Servidor iniciado en http://localhost:${PORT}`);
-        console.log(`? Archivos estáticos en: ${path.join(__dirname, '../frontend')}`);
+        console.log(`? Archivos estáticos en: ${staticRoot}`);
         console.log(`? Imágenes en: ${path.join(__dirname, 'uploads')}`);
         console.log(`? Base de datos: ${dbPath}`);
     });

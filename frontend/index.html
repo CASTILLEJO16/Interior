@@ -1,18 +1,13 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Redirigiendo...</title>
-    <script>
-        // Redirigir automáticamente a la página de login
-        window.location.href = '/login.html';
-    </script>
-</head>
-<body>
-    <div style="text-align: center; margin-top: 50px; font-family: Arial, sans-serif;">
-        <h2>Redirigiendo al sistema de inventario...</h2>
-        <p>Si no es redirigido automáticamente, <a href="/login.html">haga clic aquí</a></p>
-    </div>
-</body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sistema de Inventario</title>
+  </head>
+  <body class="bg-background text-foreground antialiased">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
 </html>
+
