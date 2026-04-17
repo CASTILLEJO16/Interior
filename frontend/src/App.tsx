@@ -15,6 +15,7 @@ import AdminUsuariosPage from './pages/admin/AdminUsuariosPage';
 import AdminReportesPage from './pages/admin/AdminReportesPage';
 import AdminHistorialPage from './pages/admin/AdminHistorialPage';
 import AdminTrasladosPage from './pages/admin/AdminTrasladosPage';
+import AdminOrdenesTrasladoPage from './pages/admin/AdminOrdenesTrasladoPage';
 import AdminArticuloDetallePage from './pages/admin/AdminArticuloDetallePage';
 
 function IndexRedirect() {
@@ -158,6 +159,18 @@ export default function App() {
                 <RequireAdmin>
                   <AppShell>
                     <AdminTrasladosPage />
+                  </AppShell>
+                </RequireAdmin>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/admin/traslados/ordenes"
+            element={
+              <RequireAuth>
+                <RequireAdmin>
+                  <AppShell>
+                    <AdminOrdenesTrasladoPage />
                   </AppShell>
                 </RequireAdmin>
               </RequireAuth>

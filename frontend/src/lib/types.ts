@@ -89,3 +89,19 @@ export type AdminUser = {
   ultimo_acceso: string | null;
   activo: 0 | 1;
 };
+
+export type TransferOrder = {
+  id: number;
+  folio: string;
+  anio: number;
+  consecutivo: number;
+  id_inventario: number;
+  nombre_articulo: string;
+  numero_inventario: string;
+  secretaria_origen: string;
+  secretaria_destino: string;
+  motivo: string | null;
+  usuario_id: number;
+  usuario_nombre: string;
+  fecha: string;
+};

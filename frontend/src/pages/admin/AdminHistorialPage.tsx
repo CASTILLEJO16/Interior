@@ -7,18 +7,61 @@ import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/Ca
 import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
 import Select from '../../components/ui/Select';
+import { cn } from '../../lib/cn';
+import { formatDateTijuana } from '../../lib/date';
+
+function TipoBadge({ tipo }: { tipo: string }) {
+  const styles: Record<string, string> = {
+    creacion_usuario: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
+    registro_mueble: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300',
+    traslado_mueble: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300',
+    modificacion_mueble: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300',
+    eliminacion_mueble: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
+    cambio_estado_uso: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300',
+    login: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
+    logout: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
+    activacion_usuario: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300',
+    desactivacion_usuario: 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300',
+    modificacion_usuario: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-300',
+    eliminacion_usuario: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+  };
+
+  const labels: Record<string, string> = {
+    creacion_usuario: 'Usuario',
+    registro_mueble: 'Registro',
+    traslado_mueble: 'Traslado',
+    modificacion_mueble: 'Modificación',
+    eliminacion_mueble: 'Eliminación',
+    cambio_estado_uso: 'Almacén ↔ Secretaría',
+    login: 'Login',
+    logout: 'Logout',
+    activacion_usuario: 'Activación',
+    desactivacion_usuario: 'Desactivación',
+    modificacion_usuario: 'Mod. Usuario',
+    eliminacion_usuario: 'Elim. Usuario'
+  };
+
+  return (
+    <span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium', styles[tipo] || 'bg-gray-100 text-gray-700')}>
+      {labels[tipo] || tipo}
+    </span>
+  );
+}
 
 const TIPOS = [
-  '',
-  'creacion_usuario',
-  'registro_mueble',
-  'traslado_mueble',
-  'modificacion_mueble',
-  'eliminacion_mueble',
-  'login',
-  'logout',
-  'activacion_usuario',
-  'desactivacion_usuario'
+  { value: '', label: 'Todos' },
+  { value: 'creacion_usuario', label: 'Creación de usuario' },
+  { value: 'registro_mueble', label: 'Registro de mueble' },
+  { value: 'traslado_mueble', label: 'Traslado de mueble' },
+  { value: 'modificacion_mueble', label: 'Modificación de mueble' },
+  { value: 'eliminacion_mueble', label: 'Eliminación de mueble' },
+  { value: 'cambio_estado_uso', label: 'Cambio de estado (Almacén/Secretaría)' },
+  { value: 'login', label: 'Inicio de sesión' },
+  { value: 'logout', label: 'Cierre de sesión' },
+  { value: 'activacion_usuario', label: 'Activación de usuario' },
+  { value: 'desactivacion_usuario', label: 'Desactivación de usuario' },
+  { value: 'modificacion_usuario', label: 'Modificación de usuario' },
+  { value: 'eliminacion_usuario', label: 'Eliminación de usuario' }
 ];
 
 export default function AdminHistorialPage() {
@@ -78,8 +121,8 @@ export default function AdminHistorialPage() {
               <label className="text-xs font-medium text-mutedForeground">Tipo</label>
               <Select value={tipo} onChange={(e) => setTipo(e.target.value)}>
                 {TIPOS.map((t) => (
-                  <option key={t || 'all'} value={t}>
-                    {t ? t : 'Todos'}
+                  <option key={t.value} value={t.value}>
+                    {t.label}
                   </option>
                 ))}
               </Select>
@@ -109,23 +152,27 @@ export default function AdminHistorialPage() {
                   <th className="px-3 py-2">Fecha</th>
                   <th className="px-3 py-2">Tipo</th>
                   <th className="px-3 py-2">Descripción</th>
+                  <th className="px-3 py-2">Usuario</th>
                   <th className="px-3 py-2">Origen</th>
                   <th className="px-3 py-2">Destino</th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((i) => (
-                  <tr key={i.id} className="border-t">
-                    <td className="px-3 py-2 whitespace-nowrap">{new Date(i.fecha_accion).toLocaleString('es-MX')}</td>
-                    <td className="px-3 py-2">{i.tipo_accion}</td>
-                    <td className="px-3 py-2">{i.descripcion}</td>
+                  <tr key={i.id} className="border-t hover:bg-muted/50 transition-colors">
+                    <td className="px-3 py-2 whitespace-nowrap text-xs">{formatDateTijuana(i.fecha_accion)}</td>
+                    <td className="px-3 py-2">
+                      <TipoBadge tipo={i.tipo_accion} />
+                    </td>
+                    <td className="px-3 py-2 max-w-md truncate" title={i.descripcion}>{i.descripcion}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">{i.usuario_nombre || '—'}</td>
                     <td className="px-3 py-2">{i.secretaria_origen || '—'}</td>
                     <td className="px-3 py-2">{i.secretaria_destino || '—'}</td>
                   </tr>
                 ))}
                 {!filtered.length ? (
                   <tr>
-                    <td className="px-3 py-6 text-center text-sm text-mutedForeground" colSpan={5}>
+                    <td className="px-3 py-6 text-center text-sm text-mutedForeground" colSpan={6}>
                       {loading ? 'Cargando…' : 'Sin eventos.'}
                     </td>
                   </tr>

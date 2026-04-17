@@ -8,7 +8,8 @@ import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
 import Modal from '../../components/ui/Modal';
 import Select from '../../components/ui/Select';
-import { SECRETARIAS } from '../../lib/secretarias';
+import ActionsDropdown from '../../components/ui/ActionsDropdown';
+import { useSecretarias } from '../../lib/secretarias';
 
 type UserDraft = {
   usuario: string;
@@ -19,14 +20,14 @@ type UserDraft = {
   secretaria: string;
 };
 
-function toDraft(u?: AdminUser | null): UserDraft {
+function toDraft(u: AdminUser | null | undefined, defaultSecretaria: string): UserDraft {
   return {
     usuario: u?.usuario || '',
     contraseña: '',
     nombre_completo: u?.nombre_completo || '',
     email: u?.email || '',
     rol: u?.rol || 'usuario',
-    secretaria: u?.secretaria || SECRETARIAS[0]
+    secretaria: u?.secretaria || defaultSecretaria
   };
 }
 
@@ -37,10 +38,11 @@ export default function AdminUsuariosPage() {
   const [loading, setLoading] = useState(false);
   const [q, setQ] = useState('');
 
+  const secretarias = useSecretarias();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<AdminUser | null>(null);
-  const [draft, setDraft] = useState<UserDraft>(toDraft(null));
+  const [draft, setDraft] = useState<UserDraft>(toDraft(null, secretarias[0] || ''));
   const [secretariaMode, setSecretariaMode] = useState<'select' | 'custom'>('select');
   const [customSecretaria, setCustomSecretaria] = useState('');
 
@@ -74,7 +76,7 @@ export default function AdminUsuariosPage() {
 
   function openCreate() {
     setEditing(null);
-    setDraft(toDraft(null));
+    setDraft(toDraft(null, secretarias[0] || ''));
     setSecretariaMode('select');
     setCustomSecretaria('');
     setOpen(true);
@@ -82,9 +84,9 @@ export default function AdminUsuariosPage() {
 
   function openEdit(u: AdminUser) {
     setEditing(u);
-    setDraft(toDraft(u));
+    setDraft(toDraft(u, secretarias[0] || ''));
     const sec = (u.secretaria || '').trim();
-    const inList = !!sec && SECRETARIAS.includes(sec as any);
+    const inList = !!sec && secretarias.includes(sec as any);
     setSecretariaMode(inList || !sec ? 'select' : 'custom');
     setCustomSecretaria(inList ? '' : sec);
     setOpen(true);
@@ -201,7 +203,8 @@ export default function AdminUsuariosPage() {
                       <td className="px-3 py-2">{u.secretaria || '—'}</td>
                       <td className="px-3 py-2">{u.activo === 1 ? 'Activo' : 'Inactivo'}</td>
                       <td className="px-3 py-2">
-                        <div className="flex flex-wrap gap-2">
+                        {/* Desktop */}
+                        <div className="hidden md:flex flex-wrap gap-2">
                           <Button size="sm" variant="secondary" onClick={() => openEdit(u)}>
                             Editar
                           </Button>
@@ -211,6 +214,16 @@ export default function AdminUsuariosPage() {
                           <Button size="sm" variant="danger" onClick={() => openDeleteModal(u)}>
                             Eliminar
                           </Button>
+                        </div>
+                        {/* Mobile */}
+                        <div className="md:hidden">
+                          <ActionsDropdown
+                            actions={[
+                              { label: 'Editar', onClick: () => openEdit(u) },
+                              { label: u.activo === 1 ? 'Desactivar' : 'Activar', onClick: () => toggle(u) },
+                              { label: 'Eliminar', onClick: () => openDeleteModal(u), variant: 'danger' }
+                            ]}
+                          />
                         </div>
                       </td>
                     </tr>
@@ -296,7 +309,7 @@ export default function AdminUsuariosPage() {
                   setSecretariaMode(mode);
                   if (mode === 'select') {
                     setCustomSecretaria('');
-                    setDraft((d) => ({ ...d, secretaria: SECRETARIAS.includes(d.secretaria as any) ? d.secretaria : SECRETARIAS[0] }));
+                    setDraft((d) => ({ ...d, secretaria: secretarias.includes(d.secretaria as any) ? d.secretaria : (secretarias[0] || '') }));
                   } else {
                     setDraft((d) => ({ ...d, secretaria: customSecretaria || d.secretaria || '' }));
                   }
@@ -308,10 +321,10 @@ export default function AdminUsuariosPage() {
               {secretariaMode === 'select' ? (
                 <Select
                   className="md:col-span-3"
-                  value={SECRETARIAS.includes(draft.secretaria as any) ? draft.secretaria : SECRETARIAS[0]}
+                  value={secretarias.includes(draft.secretaria as any) ? draft.secretaria : (secretarias[0] || '')}
                   onChange={(e) => setDraft((d) => ({ ...d, secretaria: e.target.value }))}
                 >
-                  {SECRETARIAS.map((s) => (
+                  {secretarias.map((s) => (
                     <option key={s} value={s}>
                       {s}
                     </option>

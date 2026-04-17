@@ -85,14 +85,18 @@ export default function AdminArticuloFormPage({ mode }: { mode: 'create' | 'edit
           <CardTitle>{mode === 'create' ? 'Nuevo' : loading ? 'Cargando…' : item?.numero_inventario || 'Editar'}</CardTitle>
         </CardHeader>
         <CardContent>
-          <InventoryForm
-            mode={mode}
-            allowSecretaria
-            initial={item || undefined}
-            onSubmit={submit}
-            submitLabel={mode === 'create' ? 'Crear' : 'Guardar'}
-            busy={busy}
-          />
+          {mode === 'edit' && !item ? (
+            <div className="py-12 text-center text-mutedForeground">Cargando artículo…</div>
+          ) : (
+            <InventoryForm
+              mode={mode}
+              allowSecretaria
+              initial={item || undefined}
+              onSubmit={submit}
+              submitLabel={mode === 'create' ? 'Crear' : 'Guardar'}
+              busy={busy}
+            />
+          )}
         </CardContent>
       </Card>
     </div>

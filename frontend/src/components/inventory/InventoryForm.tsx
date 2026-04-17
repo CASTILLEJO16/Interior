@@ -5,13 +5,94 @@ import Select from '../ui/Select';
 import Textarea from '../ui/Textarea';
 import type { InventoryItem } from '../../lib/types';
 import { cn } from '../../lib/cn';
-import { SECRETARIAS } from '../../lib/secretarias';
+import { useSecretarias } from '../../lib/secretarias';
 
 const subcategoriasPorCategoria: Record<string, string[]> = {
-  Mobiliario: ['Silla', 'Escritorio', 'Archivero', 'Librero', 'Mesa', 'Sofá', 'Mueble de almacenamiento'],
-  'Equipos Electrónicos': ['Computadora', 'Monitor', 'Impresora', 'Scanner', 'Proyector', 'Teléfono', 'Tablet', 'Laptop'],
-  Vehículos: ['Camioneta', 'Automóvil', 'Motocicleta'],
-  'Equipos de Oficina': ['Calculadora', 'Engrapadora', 'Guillotina', 'Laminadora', 'Perforadora', 'Rotuladora']
+  Mobiliario: [
+    'Silla ejecutiva', 'Silla secretarial', 'Silla de visita', 'Silla apilable', 'Silla ergonómica',
+    'Escritorio ejecutivo', 'Escritorio secretarial', 'Escritorio en L', 'Escritorio de cómputo',
+    'Archivero de 2 gavetas', 'Archivero de 3 gavetas', 'Archivero de 4 gavetas', 'Archivero metálico',
+    'Librero', 'Estante metálico', 'Estante de madera', 'Locker', 'Credenza',
+    'Mesa de juntas', 'Mesa de trabajo', 'Mesa auxiliar', 'Mesa de centro', 'Mesa plegable',
+    'Sofá', 'Sillón', 'Silla de espera', 'Sala de espera (juego)', 'Banca',
+    'Mueble de almacenamiento', 'Vitrina', 'Aparador', 'Counter de atención', 'Mostrador',
+    'Perchero', 'Porta paraguas', 'Basurero de oficina', 'Carro de transporte'
+  ],
+  'Equipos de Cómputo': [
+    'Computadora de escritorio (CPU)', 'Laptop', 'Tablet', 'Monitor', 'Monitor curvo',
+    'Teclado', 'Mouse', 'Docking station', 'Hub USB', 'UPS / No break',
+    'Disco duro externo', 'Memoria USB', 'Lector de tarjetas', 'Webcam', 'Micrófono USB',
+    'Audífonos con micrófono', 'Tarjeta gráfica', 'Servidor', 'NAS / Almacenamiento en red',
+    'Switch de red', 'Router', 'Access point', 'Patch panel'
+  ],
+  'Equipos de Impresión y Digitalización': [
+    'Impresora de escritorio', 'Impresora láser', 'Impresora inyección de tinta',
+    'Impresora multifuncional', 'Impresora de gran formato', 'Impresora de etiquetas',
+    'Impresora de credenciales', 'Scáner de documentos', 'Scáner de cama plana',
+    'Scáner portátil', 'Copiadora', 'Fotocopiadora industrial', 'Plóter'
+  ],
+  'Equipos de Comunicación': [
+    'Teléfono de escritorio', 'Teléfono inalámbrico', 'Teléfono IP (VoIP)',
+    'Central telefónica (PBX)', 'Conmutador', 'Radio de comunicación (walkie-talkie)',
+    'Videoteléfono', 'Auricular telefónico', 'Speakerphone / Manos libres conferencia',
+    'Fax', 'Interfón', 'Bocina de intercomunicación'
+  ],
+  'Equipos Audiovisuales': [
+    'Proyector', 'Pantalla de proyección', 'Televisor', 'Monitor LED de presentación',
+    'Pizarrón interactivo (smart board)', 'Podium', 'Micrófono de solapa',
+    'Micrófono de pie', 'Micrófono inalámbrico', 'Amplificador de audio',
+    'Bocinas', 'Sistema de videoconferencia', 'Cámara de videoconferencia',
+    'Control remoto de presentaciones (clicker)', 'DVD / Blu-ray', 'Pantalla LED exterior'
+  ],
+  'Equipos de Oficina': [
+    'Calculadora', 'Calculadora financiera', 'Engrapadora de escritorio', 'Engrapadora industrial',
+    'Guillotina de papel', 'Laminadora', 'Perforadora', 'Encuadernadora',
+    'Rotuladora', 'Selladora', 'Máquina de escribir', 'Franqueadora / Máquina de sellos',
+    'Triturador de documentos', 'Contador de billetes', 'Detector de billetes falsos',
+    'Reloj checador / Control de asistencia', 'Reloj de pared', 'Ventilador de escritorio',
+    'Despachador de agua', 'Cafetera', 'Microondas', 'Refrigerador pequeño'
+  ],
+  Vehículos: [
+    'Automóvil sedán', 'Automóvil compacto', 'Camioneta pickup', 'Camioneta SUV',
+    'Camioneta de carga', 'Van / Minibus', 'Autobús', 'Motocicleta',
+    'Bicicleta', 'Carretilla eléctrica', 'Maquinaria pesada'
+  ],
+  'Seguridad y Vigilancia': [
+    'Cámara CCTV', 'Cámara IP', 'DVR / NVR (grabador)', 'Monitor de vigilancia',
+    'Control de acceso biométrico', 'Control de acceso con tarjeta', 'Lector de huella digital',
+    'Detector de metales (arco)', 'Detector de metales (manual)',
+    'Alarma de incendio', 'Extinguidor', 'Botón de pánico', 'Candado digital',
+    'Caja fuerte', 'Casillero con llave', 'Mampara antivandalismo'
+  ],
+  'Climatización y Electricidad': [
+    'Aire acondicionado tipo split', 'Aire acondicionado de ventana', 'Aire acondicionado portátil',
+    'Calefactor', 'Ventilador de techo', 'Ventilador de pie', 'Deshumidificador',
+    'Purificador de aire', 'Planta de luz / Generador', 'Regulador de voltaje',
+    'Extensión eléctrica', 'Multicontacto', 'Lámpara de escritorio', 'Lámpara de pie',
+    'Luminaria LED', 'Panel solar'
+  ],
+  'Herramientas y Equipo de Mantenimiento': [
+    'Escalera', 'Taladro', 'Rotomartillo', 'Esmeriladora', 'Sierra',
+    'Aspiradora industrial', 'Pulidora', 'Hidrolavadora', 'Carrito de herramientas',
+    'Caja de herramientas', 'Voltímetro / Multímetro', 'Kit de herramientas de cómputo'
+  ],
+  'Mobiliario Especial': [
+    'Cubículo modular', 'Mampara divisoria', 'Pared divisoria móvil',
+    'Podium / Atril', 'Exhibidor', 'Mueble de archivo muerto', 'Casillero de empleados',
+    'Casillero de llaves', 'Mueble para impresora', 'Soporte para monitor',
+    'Soporte para TV (pared)', 'Soporte para proyector (techo)', 'Cortinas / Persianas',
+    'Tapete / Alfombra de oficina'
+  ],
+  'Material Bibliográfico y Documental': [
+    'Libro técnico', 'Enciclopedia', 'Revista de suscripción', 'Ley / Reglamento impreso',
+    'Manual de procedimientos', 'Acervo documental', 'Archivo histórico',
+    'Plano técnico', 'Mapa'
+  ],
+  'Equipo Médico y de Primeros Auxilios': [
+    'Botiquín de primeros auxilios', 'Camilla', 'Silla de ruedas',
+    'Tensiómetro', 'Termómetro digital', 'Desfibrilador (DEA)',
+    'Oxímetro', 'Kit de primeros auxilios'
+  ]
 };
 
 export type InventoryFormValues = {
@@ -63,9 +144,10 @@ export default function InventoryForm({
     imagen: null
   }));
 
+  const secretarias = useSecretarias();
   const [previewUrl, setPreviewUrl] = useState<string | null>(initial?.imagen || null);
   const initialSecretaria = (initial?.secretaria || '').trim();
-  const initialInList = !!initialSecretaria && SECRETARIAS.includes(initialSecretaria as any);
+  const initialInList = !!initialSecretaria && secretarias.includes(initialSecretaria as any);
   const [secretariaMode, setSecretariaMode] = useState<'select' | 'custom'>(() =>
     allowSecretaria ? (initialInList || !initialSecretaria ? 'select' : 'custom') : 'select'
   );
@@ -82,9 +164,9 @@ export default function InventoryForm({
   useEffect(() => {
     if (!allowSecretaria) return;
     if (secretariaMode !== 'select') return;
-    if (values.secretaria && SECRETARIAS.includes(values.secretaria as any)) return;
-    setValues((v) => ({ ...v, secretaria: SECRETARIAS[0] }));
-  }, [allowSecretaria, secretariaMode, values.secretaria]);
+    if (values.secretaria && secretarias.includes(values.secretaria as any)) return;
+    setValues((v) => ({ ...v, secretaria: secretarias[0] || '' }));
+  }, [allowSecretaria, secretariaMode, values.secretaria, secretarias]);
 
   const subcats = useMemo(() => subcategoriasPorCategoria[values.categoria] || [], [values.categoria]);
 
@@ -165,7 +247,7 @@ export default function InventoryForm({
                 const mode = e.target.value as 'select' | 'custom';
                 setSecretariaMode(mode);
                 if (mode === 'select') {
-                  const next = values.secretaria && SECRETARIAS.includes(values.secretaria as any) ? values.secretaria : SECRETARIAS[0];
+                  const next = values.secretaria && secretarias.includes(values.secretaria as any) ? values.secretaria : (secretarias[0] || '');
                   update('secretaria', next);
                   setCustomSecretaria('');
                 } else {
@@ -179,10 +261,10 @@ export default function InventoryForm({
             {secretariaMode === 'select' ? (
               <Select
                 className="md:col-span-3"
-                value={SECRETARIAS.includes((values.secretaria || '') as any) ? (values.secretaria as any) : SECRETARIAS[0]}
+                value={secretarias.includes((values.secretaria || '') as any) ? (values.secretaria as any) : (secretarias[0] || '')}
                 onChange={(e) => update('secretaria', e.target.value)}
               >
-                {SECRETARIAS.map((s) => (
+                {secretarias.map((s) => (
                   <option key={s} value={s}>
                     {s}
                   </option>

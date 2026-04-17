@@ -3,35 +3,102 @@
 @tailwind utilities;
 
 :root {
-  --background: 0 0% 100%;
-  --foreground: 222.2 47.4% 11.2%;
+  /* iOS-style pastel colors */
+  --background: 220 20% 98%;
+  --foreground: 220 15% 20%;
   --card: 0 0% 100%;
-  --card-foreground: 222.2 47.4% 11.2%;
-  --border: 214.3 31.8% 88%;
-  --muted: 210 40% 96.1%;
-  --muted-foreground: 215.4 16.3% 39%;
-  --primary: 222.2 47.4% 11.2%;
-  --primary-foreground: 210 40% 98%;
-  --danger: 0 84.2% 60.2%;
-  --danger-foreground: 210 40% 98%;
-  --success: 142.1 70.6% 45.3%;
-  --success-foreground: 210 40% 98%;
+  --card-foreground: 220 15% 20%;
+  --border: 220 13% 90%;
+  --muted: 220 14% 96%;
+  --muted-foreground: 220 10% 50%;
+  
+  /* Primary - iOS Blue pastel */
+  --primary: 211 90% 55%;
+  --primary-foreground: 0 0% 100%;
+  
+  /* Danger - iOS Red pastel */
+  --danger: 0 75% 60%;
+  --danger-foreground: 0 0% 100%;
+  
+  /* Success - iOS Green pastel */
+  --success: 142 60% 55%;
+  --success-foreground: 0 0% 100%;
+  
+  /* Warning - iOS Orange/Yellow */
+  --warning: 35 95% 53%;
+  --warning-foreground: 0 0% 100%;
+  
+  /* iOS System colors */
+  --ios-blue: 211 90% 55%;
+  --ios-green: 142 60% 55%;
+  --ios-red: 0 75% 60%;
+  --ios-orange: 35 95% 53%;
+  --ios-purple: 270 60% 60%;
+  --ios-pink: 340 75% 60%;
+  --ios-teal: 180 55% 50%;
+  --ios-yellow: 50 95% 55%;
+  --ios-gray: 220 10% 55%;
 }
 
 .dark {
-  --background: 222.2 47.4% 8.5%;
-  --foreground: 210 40% 98%;
-  --card: 222.2 47.4% 10.5%;
-  --card-foreground: 210 40% 98%;
-  --border: 217.2 32.6% 21%;
-  --muted: 217.2 32.6% 14%;
-  --muted-foreground: 215 20.2% 72%;
-  --primary: 210 40% 98%;
-  --primary-foreground: 222.2 47.4% 11.2%;
-  --danger: 0 72% 51%;
-  --danger-foreground: 210 40% 98%;
-  --success: 142 66% 45%;
-  --success-foreground: 210 40% 98%;
+  --background: 220 25% 10%;
+  --foreground: 220 15% 95%;
+  --card: 220 20% 15%;
+  --card-foreground: 220 15% 95%;
+  --border: 220 15% 25%;
+  --muted: 220 15% 20%;
+  --muted-foreground: 220 15% 60%;
+  --primary: 211 90% 65%;
+  --primary-foreground: 0 0% 100%;
+  --danger: 0 75% 65%;
+  --danger-foreground: 0 0% 100%;
+  --success: 142 60% 60%;
+  --success-foreground: 0 0% 100%;
+  --warning: 35 95% 60%;
+  --warning-foreground: 0 0% 100%;
+}
+
+@layer utilities {
+  /* iOS Glassmorphism effects */
+  .glass {
+    @apply bg-white/80 backdrop-blur-xl;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+  }
+  
+  .glass-dark {
+    @apply bg-black/40 backdrop-blur-xl;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+  
+  .glass-card {
+    @apply bg-white/70 backdrop-blur-lg;
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
+  }
+  
+  .glass-card-dark {
+    @apply bg-black/30 backdrop-blur-lg;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  }
+  
+  /* iOS-style smooth shadow */
+  .shadow-ios {
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06), 0 1px 4px rgba(0, 0, 0, 0.04);
+  }
+  
+  .shadow-ios-lg {
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(0, 0, 0, 0.04);
+  }
+  
+  /* iOS-style gradients */
+  .gradient-ios {
+    background: linear-gradient(180deg, hsl(var(--card)) 0%, hsl(var(--muted)) 100%);
+  }
+  
+  .gradient-ios-blue {
+    background: linear-gradient(135deg, hsl(211, 90%, 65%) 0%, hsl(230, 80%, 60%) 100%);
+  }
 }
 
 @layer base {
@@ -40,5 +107,35 @@
   }
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+/* Estilos para impresión */
+@media print {
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  
+  body {
+    background: white !important;
+    color: black !important;
+  }
+  
+  .print-container,
+  .print-container * {
+    background: white !important;
+    color: black !important;
+    box-shadow: none !important;
+  }
+  
+  .print-container h1,
+  .print-container h2,
+  .print-container h3,
+  .print-container p,
+  .print-container label,
+  .print-container span,
+  .print-container div {
+    color: black !important;
   }
 }

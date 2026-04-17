@@ -7,7 +7,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen">
       <Navbar mobileOpen={mobileOpen} onToggleMobile={() => setMobileOpen((v) => !v)} onCloseMobile={() => setMobileOpen(false)} />
-      <main className="mx-auto max-w-[1400px] p-4">{children}</main>
+      <main className="mx-auto max-w-[1400px] p-2 sm:p-4">{children}</main>
     </div>
   );
 }

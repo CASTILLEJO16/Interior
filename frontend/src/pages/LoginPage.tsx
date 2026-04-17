@@ -39,10 +39,11 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/20 dark:from-slate-950 dark:via-slate-900 dark:to-slate-800">
+      {/* Fondo decorativo iOS */}
       <div className="pointer-events-none fixed inset-0">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,hsl(var(--muted))_0,transparent_55%),radial-gradient(circle_at_70%_80%,hsl(var(--muted))_0,transparent_55%)]" />
-        <div className="absolute inset-0 opacity-40 [background-image:linear-gradient(to_right,hsl(var(--border))_1px,transparent_1px),linear-gradient(to_bottom,hsl(var(--border))_1px,transparent_1px)] [background-size:44px_44px]" />
+        <div className="absolute -left-[20%] -top-[20%] h-[60%] w-[60%] rounded-full bg-blue-400/20 blur-[100px] dark:bg-blue-600/10" />
+        <div className="absolute -bottom-[20%] -right-[20%] h-[60%] w-[60%] rounded-full bg-purple-400/20 blur-[100px] dark:bg-purple-600/10" />
       </div>
 
       <div className="relative mx-auto flex min-h-screen max-w-[1100px] items-center justify-center px-4 py-10">
@@ -51,7 +52,7 @@ export default function LoginPage() {
         </div>
 
         <div className="w-full max-w-md">
-          <div className="rounded-2xl border bg-card p-6 shadow-soft">
+          <div className="rounded-3xl border border-white/40 bg-white/70 p-8 shadow-ios-xl backdrop-blur-2xl dark:border-white/10 dark:bg-black/40">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <div className="text-xs font-semibold text-mutedForeground">BDInterior</div>

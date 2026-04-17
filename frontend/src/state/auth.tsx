@@ -68,6 +68,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(nextUser);
       },
       logout: () => {
+        if (token) {
+          api.logout(token).catch(console.error);
+        }
         storage.clearAuth();
         setToken(null);
         setUser(null);

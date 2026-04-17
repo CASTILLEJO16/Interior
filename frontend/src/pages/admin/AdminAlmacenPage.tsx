@@ -10,7 +10,8 @@ import Button from '../../components/ui/Button';
 import Modal from '../../components/ui/Modal';
 import InventoryForm, { type InventoryFormValues } from '../../components/inventory/InventoryForm';
 import Select from '../../components/ui/Select';
-import { SECRETARIAS } from '../../lib/secretarias';
+import ActionsDropdown from '../../components/ui/ActionsDropdown';
+import { useSecretarias } from '../../lib/secretarias';
 
 function money(v: number) {
   return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(v);
@@ -34,6 +35,7 @@ export default function AdminAlmacenPage() {
   const { token } = useAuth();
   const toast = useToast();
   const nav = useNavigate();
+  const secretarias = useSecretarias();
 
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -195,7 +197,8 @@ export default function AdminAlmacenPage() {
                       <td className="px-3 py-2">{money(i.costo)}</td>
                       <td className="px-3 py-2">{estatusBadge(i.estatus)}</td>
                       <td className="px-3 py-2">
-                        <div className="flex flex-wrap gap-2">
+                        {/* Desktop: botones individuales */}
+                        <div className="hidden lg:flex flex-wrap gap-2">
                           <Button size="sm" variant="secondary" onClick={() => nav(`/admin/articulos/${i.id}`)}>
                             Ver
                           </Button>
@@ -226,6 +229,18 @@ export default function AdminAlmacenPage() {
                           <Button size="sm" variant="danger" onClick={() => onDelete(i)}>
                             Eliminar
                           </Button>
+                        </div>
+                        {/* Mobile: dropdown de acciones */}
+                        <div className="lg:hidden">
+                          <ActionsDropdown
+                            actions={[
+                              { label: 'Ver detalle', onClick: () => nav(`/admin/articulos/${i.id}`) },
+                              { label: 'Editar', onClick: () => { setEditItem(i); setEditOpen(true); } },
+                              { label: 'Asignar', onClick: () => { setMoveItem(i); setMoveOpen(true); setMoveSecretaria(''); } },
+                              { label: 'QR', onClick: () => openQr(i) },
+                              { label: 'Eliminar', onClick: () => onDelete(i), variant: 'danger' }
+                            ]}
+                          />
                         </div>
                       </td>
                     </tr>
@@ -283,7 +298,7 @@ export default function AdminAlmacenPage() {
             <label className="text-xs font-medium text-mutedForeground">Secretaría destino</label>
             <Select value={moveSecretaria} onChange={(e) => setMoveSecretaria(e.target.value)}>
               <option value="">Seleccione…</option>
-              {SECRETARIAS.map((s) => (
+              {secretarias.map((s) => (
                 <option key={s} value={s}>
                   {s}
                 </option>

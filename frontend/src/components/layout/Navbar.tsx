@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../state/auth';
 import DarkModeToggle from './DarkModeToggle';
 import Button from '../ui/Button';
+import Modal from '../ui/Modal';
 import { cn } from '../../lib/cn';
 
 type MenuItem = { to: string; label: string; description?: string };
@@ -95,6 +96,7 @@ export default function Navbar({
 }) {
   const { user, logout } = useAuth();
   const nav = useNavigate();
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   const isAdmin = user?.rol === 'admin';
   const homeHref = isAdmin ? '/admin' : '/registro';
@@ -103,7 +105,8 @@ export default function Navbar({
     { to: '/admin/almacen', label: 'Almacén', description: 'Tabla, QR, asignación y edición' },
     { to: '/admin/secretarias', label: 'Secretarías', description: 'Tablas por secretaría' },
     { to: '/admin/articulos/nuevo', label: 'Agregar artículo', description: 'Alta rápida de inventario' },
-    { to: '/admin/traslado', label: 'Traslado', description: 'Mover entre secretarías' }
+    { to: '/admin/traslado', label: 'Traslado', description: 'Mover entre secretarías' },
+    { to: '/admin/traslados/ordenes', label: 'Órdenes de Traslado', description: 'Historial y reimpresión de folios' }
   ];
 
   const adminItems: MenuItem[] = [
@@ -115,10 +118,17 @@ export default function Navbar({
   const mobileAdminAll: MenuItem[] = [{ to: '/admin', label: 'Inicio' }, ...inventarioItems, ...adminItems];
   const mobileUserAll: MenuItem[] = [{ to: '/registro', label: 'Registro', description: 'Captura de artículos' }];
 
+  function handleLogoutConfirm() {
+    setConfirmOpen(false);
+    onCloseMobile();
+    logout();
+    nav('/login', { replace: true });
+  }
+
   return (
     <>
-      <div className="sticky top-0 z-30 border-b bg-background/90 backdrop-blur supports-[backdrop-filter]:bg-background/70">
-        <div className="mx-auto flex h-14 max-w-[1400px] items-center gap-3 px-4">
+      <header className="sticky top-0 z-30 border-b border-white/20 bg-white/70 backdrop-blur-xl supports-[backdrop-filter]:bg-white/60 dark:border-white/10 dark:bg-black/50 dark:supports-[backdrop-filter]:bg-black/40">
+        <div className="mx-auto flex h-16 max-w-[1400px] items-center gap-4 px-4">
           <button
             className="inline-flex h-9 w-9 items-center justify-center rounded-md border bg-card hover:bg-muted md:hidden"
             aria-label="Abrir menú"
@@ -129,8 +139,8 @@ export default function Navbar({
             </svg>
           </button>
 
-          <NavLink to={homeHref} className="inline-flex items-center gap-2 rounded-md px-2 py-1 hover:bg-muted" end>
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl border bg-card shadow-soft">
+          <NavLink to={homeHref} className="inline-flex items-center gap-2 rounded-xl px-2 py-1 hover:bg-white/50 dark:hover:bg-white/10 transition-colors" end>
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/40 bg-white/80 shadow-ios backdrop-blur-sm dark:border-white/10 dark:bg-white/10">
               <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4a2 2 0 001-1.73z" />
                 <path d="M3.3 7L12 12l8.7-5" />
@@ -161,17 +171,14 @@ export default function Navbar({
               <Button
                 variant="secondary"
                 className="h-9"
-                onClick={() => {
-                  logout();
-                  nav('/login', { replace: true });
-                }}
+                onClick={() => setConfirmOpen(true)}
               >
                 Cerrar sesión
               </Button>
             </div>
           </div>
         </div>
-      </div>
+      </header>
 
       {mobileOpen ? (
         <div className="fixed inset-0 z-40 md:hidden">
@@ -203,11 +210,7 @@ export default function Navbar({
               <Button
                 variant="secondary"
                 className="w-full"
-                onClick={() => {
-                  onCloseMobile();
-                  logout();
-                  nav('/login', { replace: true });
-                }}
+                onClick={() => setConfirmOpen(true)}
               >
                 Cerrar sesión
               </Button>
@@ -215,7 +218,27 @@ export default function Navbar({
           </div>
         </div>
       ) : null}
+
+      {/* Modal de confirmación de cierre de sesión */}
+      <Modal
+        open={confirmOpen}
+        title="¿Cerrar sesión?"
+        onClose={() => setConfirmOpen(false)}
+      >
+        <div className="flex flex-col gap-4">
+          <p className="text-sm text-mutedForeground">
+            Tu sesión se cerrará y serás redirigido a la pantalla de inicio de sesión.
+          </p>
+          <div className="flex gap-2">
+            <Button variant="danger" onClick={handleLogoutConfirm}>
+              Sí, cerrar sesión
+            </Button>
+            <Button variant="secondary" onClick={() => setConfirmOpen(false)}>
+              Cancelar
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </>
   );
 }
-

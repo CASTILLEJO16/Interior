@@ -1,3 +1,7 @@
+import { useState, useEffect } from 'react';
+import { api } from './api';
+import { useAuth } from '../state/auth';
+
 export const SECRETARIAS = [
   'Organización',
   'Finanzas',
@@ -33,3 +37,20 @@ export function mergeSecretarias(...lists: Array<Array<string | null | undefined
   return out;
 }
 
+export function useSecretarias() {
+  const { token } = useAuth();
+  const [list, setList] = useState<string[]>([...SECRETARIAS]);
+
+  useEffect(() => {
+    if (!token) return;
+    let active = true;
+    api.secretarias(token).then(res => {
+      if (active && res.success && res.data) {
+        setList(prev => mergeSecretarias(prev, res.data || []));
+      }
+    }).catch(console.error);
+    return () => { active = false; };
+  }, [token]);
+
+  return list;
+}

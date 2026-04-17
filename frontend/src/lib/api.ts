@@ -75,7 +75,7 @@ export const api = {
     return request<unknown>(`/api/inventario/${id}`, { method: 'DELETE', token });
   },
   moverInventario(token: string, id: number, payload: { estado_uso: 'en_uso' | 'en_almacen'; secretaria?: string }) {
-    return request<unknown>(`/api/inventario/${id}/mover`, {
+    return request<{ success: boolean; message: string; folio: string }>(`/api/inventario/${id}/mover`, {
       method: 'PUT',
       token,
       headers: { 'Content-Type': 'application/json' },
@@ -83,7 +83,7 @@ export const api = {
     });
   },
   trasladarInventario(token: string, id: number, payload: { secretaria_destino: string; motivo_traslado?: string }) {
-    return request<unknown>(`/api/inventario/${id}/trasladar`, {
+    return request<{ success: boolean; message: string; folio: string }>(`/api/inventario/${id}/trasladar`, {
       method: 'PUT',
       token,
       headers: { 'Content-Type': 'application/json' },
@@ -140,5 +140,11 @@ export const api = {
   },
   eliminarUsuario(token: string, id: number) {
     return request<unknown>(`/api/usuarios/${id}`, { method: 'DELETE', token });
+  },
+  logout(token: string) {
+    return request<unknown>('/api/logout', { method: 'POST', token });
+  },
+  getOrdenesTraslado(token: string) {
+    return request<TransferOrder[]>('/api/inventario/ordenes-traslado', { method: 'GET', token });
   }
 };
